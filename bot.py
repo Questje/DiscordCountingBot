@@ -159,7 +159,7 @@ async def on_ready():
     if channel:
         game_state = game_logic.get_game_state()
         await channel.send(
-            f"🤖 **Counting Bot is ready!** Let's count together! "
+            f"🤖 **Questje's Counting Bot is ready!** Let's count together! "
             f"The next number is **{game_state['next_number']}**! 🎯"
         )
         print(f'📢 Sent greeting to channel {CHANNEL_ID}')

@@ -1,13 +1,29 @@
 """Game logic and state management for the counting bot."""
 
-import json
 import os
+import json
 import threading
 from datetime import datetime
-from constants import STATS_FILE, GAME_STATE_FILE, ACHIEVEMENT_EMOJIS
+from dotenv import load_dotenv
+import pymysql
+from pymysql.cursors import DictCursor
 import concurrent.futures
 
-# State variables
+# Load environment variables
+load_dotenv('.env')
+
+# Database configuration
+DB_CONFIG = {
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'user': os.getenv('DB_USER'),
+    'password': os.getenv('DB_PASSWORD'),
+    'database': os.getenv('DB_NAME'),
+    'port': int(os.getenv('DB_PORT', 3306)),
+    'charset': 'utf8mb4',
+    'cursorclass': DictCursor
+}
+
+# State variables (cache)
 next_number = 1
 user_stats = {}
 number_history = []
@@ -21,18 +37,79 @@ SHARED_DATA_LOCK = threading.Lock()
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
 
-def _write_state_to_disk(game_state_copy, stats_copy):
-    """Write state to disk (run in thread to avoid blocking)."""
+def get_db_connection():
+    """Create and return a database connection."""
     try:
-        with open(GAME_STATE_FILE, 'w') as f:
-            json.dump(game_state_copy, f, indent=4)
-        
-        with open(STATS_FILE, 'w') as f:
-            json.dump(stats_copy, f, indent=4)
-        
-        print(f"💾 Game state saved at {datetime.now().isoformat()}")
-    except (IOError, TypeError) as e:
-        print(f"❌ Error saving state to disk: {e}")
+        return pymysql.connect(**DB_CONFIG)
+    except Exception as e:
+        print(f"❌ Database connection error: {e}")
+        raise
+
+
+def _write_game_state_to_db(game_state_copy):
+    """Write game state to database (run in thread to avoid blocking)."""
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                UPDATE game_state 
+                SET next_number = %s,
+                    last_correct_user = %s,
+                    total_correct = %s,
+                    last_streak_milestone = %s,
+                    testing_mode = %s
+                WHERE id = 1
+            """, (
+                game_state_copy['next_number'],
+                game_state_copy['last_correct_user'],
+                game_state_copy['total_correct'],
+                game_state_copy['last_streak_milestone'],
+                game_state_copy['testing_mode']
+            ))
+            conn.commit()
+        conn.close()
+        print(f"💾 Game state saved to database at {datetime.now().isoformat()}")
+    except Exception as e:
+        print(f"❌ Error saving game state to database: {e}")
+
+
+def _write_user_stats_to_db(user_id, stats):
+    """Write user stats to database (run in thread to avoid blocking)."""
+    try:
+        conn = get_db_connection()
+        with conn.cursor() as cursor:
+            achievements_json = json.dumps(list(stats.get('achievements', set())))
+            cursor.execute("""
+                INSERT INTO user_stats 
+                (user_id, username, correct, wrong, streak, best_streak, 
+                 achievements, consecutive_wrong, back_to_back_violations, timeout_until)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON DUPLICATE KEY UPDATE
+                    username = VALUES(username),
+                    correct = VALUES(correct),
+                    wrong = VALUES(wrong),
+                    streak = VALUES(streak),
+                    best_streak = VALUES(best_streak),
+                    achievements = VALUES(achievements),
+                    consecutive_wrong = VALUES(consecutive_wrong),
+                    back_to_back_violations = VALUES(back_to_back_violations),
+                    timeout_until = VALUES(timeout_until)
+            """, (
+                user_id,
+                stats.get('username', ''),
+                stats.get('correct', 0),
+                stats.get('wrong', 0),
+                stats.get('streak', 0),
+                stats.get('best_streak', 0),
+                achievements_json,
+                stats.get('consecutive_wrong', 0),
+                stats.get('back_to_back_violations', 0),
+                stats.get('timeout_until', 0)
+            ))
+            conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"❌ Error saving user stats to database: {e}")
 
 
 def save_state():
@@ -45,41 +122,66 @@ def save_state():
             'last_streak_milestone': last_streak_milestone,
             'testing_mode': testing_mode,
         }
-        stats_copy = {
-            uid: {**stats, 'achievements': list(stats.get('achievements', []))}
-            for uid, stats in user_stats.items()
-        }
     
-    executor.submit(_write_state_to_disk, game_state_copy, stats_copy)
+    # Save game state
+    executor.submit(_write_game_state_to_db, game_state_copy)
+    
+    # Save all user stats
+    with SHARED_DATA_LOCK:
+        for uid, stats in user_stats.items():
+            executor.submit(_write_user_stats_to_db, uid, stats.copy())
 
 
 def load_state():
-    """Load game state and user stats from JSON files."""
+    """Load game state and user stats from database."""
     global next_number, user_stats, last_correct_user, total_correct, last_streak_milestone, testing_mode
     
     with SHARED_DATA_LOCK:
         try:
-            if os.path.exists(GAME_STATE_FILE):
-                with open(GAME_STATE_FILE, 'r') as f:
-                    game_state = json.load(f)
-                    next_number = game_state.get('next_number', 1)
-                    last_correct_user = game_state.get('last_correct_user', None)
-                    total_correct = game_state.get('total_correct', 0)
-                    last_streak_milestone = game_state.get('last_streak_milestone', 0)
-                    testing_mode = game_state.get('testing_mode', False)
-                    print(f"✅ Loaded game state from {GAME_STATE_FILE}.")
+            conn = get_db_connection()
             
-            if os.path.exists(STATS_FILE):
-                with open(STATS_FILE, 'r') as f:
-                    loaded_stats = json.load(f)
-                    for uid, stats in loaded_stats.items():
-                        user_id = int(uid)
-                        user_stats[user_id] = stats
-                        user_stats[user_id]['achievements'] = set(stats.get('achievements', []))
-                        user_stats[user_id].setdefault('best_streak', stats.get('streak', 0))
-                    print(f"✅ Loaded {len(user_stats)} user records from {STATS_FILE}.")
-        except (IOError, json.JSONDecodeError) as e:
-            print(f"⚠️ Could not load state, starting fresh. Reason: {e}")
+            # Load game state
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM game_state WHERE id = 1")
+                game_state = cursor.fetchone()
+                
+                if game_state:
+                    next_number = game_state['next_number']
+                    last_correct_user = game_state['last_correct_user']
+                    total_correct = game_state['total_correct']
+                    last_streak_milestone = game_state['last_streak_milestone']
+                    testing_mode = bool(game_state['testing_mode'])
+                    print(f"✅ Loaded game state from database.")
+                else:
+                    print("⚠️ No game state found in database, using defaults.")
+            
+            # Load user stats
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT * FROM user_stats")
+                users = cursor.fetchall()
+                
+                for user in users:
+                    user_id = user['user_id']
+                    achievements = set(json.loads(user['achievements'])) if user['achievements'] else set()
+                    
+                    user_stats[user_id] = {
+                        'username': user['username'],
+                        'correct': user['correct'],
+                        'wrong': user['wrong'],
+                        'streak': user['streak'],
+                        'best_streak': user['best_streak'],
+                        'achievements': achievements,
+                        'consecutive_wrong': user['consecutive_wrong'],
+                        'back_to_back_violations': user['back_to_back_violations'],
+                        'timeout_until': user['timeout_until']
+                    }
+                
+                print(f"✅ Loaded {len(user_stats)} user records from database.")
+            
+            conn.close()
+            
+        except Exception as e:
+            print(f"⚠️ Could not load state from database, starting fresh. Reason: {e}")
 
 
 def reset_game(preserve_stats=True):
@@ -128,6 +230,9 @@ def update_user_stats(user_id, username, correct):
         stats['wrong'] += 1
         stats['streak'] = 0
         stats['consecutive_wrong'] += 1
+    
+    # Save to database asynchronously
+    executor.submit(_write_user_stats_to_db, user_id, stats.copy())
 
 
 def add_to_history(number, username, input_text, types_used, parse_method):
@@ -184,6 +289,15 @@ def process_correct_answer(user_id, username, parsed_number, content, types_used
     add_to_history(parsed_number, username, content, types_used, parse_method)
     next_number += 1
     
+    # Save game state to database
+    executor.submit(_write_game_state_to_db, {
+        'next_number': next_number,
+        'last_correct_user': last_correct_user,
+        'total_correct': total_correct,
+        'last_streak_milestone': last_streak_milestone,
+        'testing_mode': testing_mode,
+    })
+    
     return True
 
 
@@ -198,6 +312,16 @@ def process_wrong_answer(user_id, username, should_reset):
         next_number = 1
         last_correct_user = None
         total_correct = 0
+        
+        # Save game state to database
+        executor.submit(_write_game_state_to_db, {
+            'next_number': next_number,
+            'last_correct_user': last_correct_user,
+            'total_correct': total_correct,
+            'last_streak_milestone': last_streak_milestone,
+            'testing_mode': testing_mode,
+        })
+        
         return True
     
     return False

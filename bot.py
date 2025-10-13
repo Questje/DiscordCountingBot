@@ -15,8 +15,8 @@ import game_logic
 from dotenv import load_dotenv
 load_dotenv('.env')
 TOKEN = os.getenv("TOKEN") 
-#CHANNEL_ID = 1250289722937315353  # DEV (Dev Server)
-CHANNEL_ID=1413124693392625846   # PROD (Questje's Hangout - #counting)
+CHANNEL_ID = 1250289722937315353  # DEV (Dev Server)
+#CHANNEL_ID = 1413124693392625846   # PROD (Questje's Hangout - #counting)
 
 # Discord client setup
 intents = discord.Intents.default()

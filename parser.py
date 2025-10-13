@@ -201,9 +201,11 @@ def extract_first_number_from_text(text):
     languages_used = set()
     current_pos = 0
     
+    # Find digit numbers with their positions
     for match in re.finditer(r'\b(\d+)\b', text):
-        found_numbers.append((int(match.group(1)), match.start(), 'digit'))
+        found_numbers.append((int(match.group(1)), match.start(), 'digit', set()))
     
+    # Find multilang numbers
     words = text.lower().split()
     for i, word in enumerate(words):
         clean_word = re.sub(r'[^\w\-]', '', word)
@@ -211,32 +213,35 @@ def extract_first_number_from_text(text):
         if multilang_result is not None:
             multilang_num, langs = multilang_result
             word_pos = text.lower().find(word.lower(), current_pos)
-            found_numbers.append((multilang_num, word_pos, 'multilang'))
-            languages_used.update(langs)  # Add all languages for this word
+            found_numbers.append((multilang_num, word_pos, 'multilang', langs))
             current_pos = word_pos + len(word)
-            break  # Take the first one
     
-    if not found_numbers:  # Only try w2n if we haven't found anything yet
+    # Try English word2number only if no multilang found
+    if not any(entry[2] == 'multilang' for entry in found_numbers):
+        current_pos = 0
         for i, word in enumerate(words):
             clean_word = re.sub(r'[^\w\-]', '', word)
-            # Skip if it's a hyphenated non-compound (would be misinterpreted)
+            # Skip if it's a hyphenated non-compound
             if '-' in clean_word and not is_valid_compound_word(clean_word):
                 continue
             try:
                 num = w2n.word_to_num(clean_word)
                 word_pos = text.lower().find(word.lower(), current_pos)
-                found_numbers.append((num, word_pos, 'english'))
-                languages_used.add('en')
+                found_numbers.append((num, word_pos, 'english', {'en'}))
                 current_pos = word_pos + len(word)
                 break  # Take the first one
             except ValueError:
                 pass
     
-    valid_numbers = [(num, pos, typ) for num, pos, typ in found_numbers if num > 0]
+    # Filter valid numbers
+    valid_numbers = [(num, pos, typ, langs) for num, pos, typ, langs in found_numbers if num > 0]
     
     if valid_numbers:
+        # Sort by position to get the first one
         valid_numbers.sort(key=lambda x: x[1])
-        return valid_numbers[0][0], valid_numbers[0][1], languages_used
+        first_num, first_pos, first_type, first_langs = valid_numbers[0]
+        # CRITICAL: Only return languages from the FIRST extracted number
+        return first_num, first_pos, first_langs
     
     return None, None, set()
 

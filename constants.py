@@ -2,10 +2,6 @@
 
 import math
 
-# File paths for persistence
-STATS_FILE = 'user_stats.json'
-GAME_STATE_FILE = 'game_state.json'
-
 # Mathematical constants
 MATH_CONSTANTS = {
     'pi': math.pi,
@@ -112,9 +108,9 @@ MULTILANG_NUMBERS = {
     'elli': (50, {'tr'}), 'altmış': (60, {'tr'}), 'altmis': (60, {'tr'}), 'yetmiş': (70, {'tr'}), 'yetmis': (70, {'tr'}),
     'seksen': (80, {'tr'}), 'doksan': (90, {'tr'}), 'yüz': (100, {'tr'}), 'yuz': (100, {'tr'}),
     
-    # Danish
+    # Danish (shared words already defined above, only Danish-specific words here)
     'nul': (0, {'dk'}), 'en': (1, {'dk', 'no'}), 'et': (1, {'dk'}), 'to': (2, {'dk', 'no'}), 'fire': (4, {'dk', 'no'}),
-    'seks': (6, {'dk', 'no'}), 'syv': (7, {'dk', 'no'}), 'otte': (8, {'dk'}), 'ni': (9, {'no'}), 'ti': (10, {'dk', 'no'}),
+    'seks': (6, {'dk', 'no'}), 'syv': (7, {'dk', 'no'}), 'otte': (8, {'dk'}), 'ni': (9, {'dk', 'no'}), 'ti': (10, {'dk', 'no'}),
     'elleve': (11, {'dk', 'no'}), 'tretten': (13, {'dk', 'no'}), 'fjorten': (14, {'dk', 'no'}), 'femten': (15, {'dk'}),
     'seksten': (16, {'dk', 'no'}), 'sytten': (17, {'dk', 'no'}), 'søtten': (17, {'no'}), 'atten': (18, {'dk', 'no'}), 'nitten': (19, {'dk', 'no'}), 'tyve': (20, {'dk', 'no'}),
     'enogtyve': (21, {'dk'}), 'toogtyve': (22, {'dk'}), 'treogtyve': (23, {'dk'}), 'fireogtyve': (24, {'dk'}),
@@ -136,17 +132,12 @@ MULTILANG_NUMBERS = {
     'deg a thrigain': (70, {'cy'}), 'pedwar ugain': (80, {'cy'}), 'deg a phedwar ugain': (90, {'cy'}),
     'cant': (100, {'cy'}),
     
-    # Norwegian
-    'null': (0, 'no'), 'en': (1, 'no'), 'ett': (1, 'no'), 'to': (2, 'no'), 'tre': (3, 'no'), 'fire': (4, 'no'),
-    'fem': (5, 'no'), 'seks': (6, 'no'), 'syv': (7, 'no'), 'sju': (7, 'no'), 'åtte': (8, 'no'), 'atte': (8, 'no'),
-    'ni': (9, 'no'), 'ti': (10, 'no'), 'elleve': (11, 'no'), 'tolv': (12, 'no'), 'tretten': (13, 'no'),
-    'fjorten': (14, 'no'), 'femten': (15, 'no'), 'seksten': (16, 'no'), 'sytten': (17, 'no'), 'søtten': (17, 'no'),
-    'atten': (18, 'no'), 'nitten': (19, 'no'), 'tjue': (20, 'no'), 'tyve': (20, 'no'), 'tjueen': (21, 'no'),
-    'tjueto': (22, 'no'), 'tjuetre': (23, 'no'), 'tjuefire': (24, 'no'), 'tjuefem': (25, 'no'),
-    'tjueseks': (26, 'no'), 'tjuesyv': (27, 'no'), 'tjueåtte': (28, 'no'), 'tjueatte': (28, 'no'),
-    'tjueni': (29, 'no'), 'tretti': (30, 'no'), 'tredve': (30, 'no'), 'førti': (40, 'no'), 'forti': (40, 'no'),
-    'femti': (50, 'no'), 'seksti': (60, 'no'), 'søtti': (70, 'no'), 'sytti': (70, 'no'),
-    'åtti': (80, 'no'), 'atti': (80, 'no'), 'nitti': (90, 'no'), 'hundre': (100, 'no'),
+    # Norwegian (only Norwegian-specific words, shared words already defined above)
+    'tjueen': (21, {'no'}), 'tjueto': (22, {'no'}), 'tjuetre': (23, {'no'}), 'tjuefire': (24, {'no'}), 'tjuefem': (25, {'no'}),
+    'tjueseks': (26, {'no'}), 'tjuesyv': (27, {'no'}), 'tjueåtte': (28, {'no'}), 'tjueatte': (28, {'no'}),
+    'tjueni': (29, {'no'}), 'tredve': (30, {'no'}), 'førti': (40, {'no'}), 'forti': (40, {'no'}),
+    'seksti': (60, {'no'}), 'søtti': (70, {'no'}), 'sytti': (70, {'no'}),
+    'åtti': (80, {'no'}), 'atti': (80, {'no'}), 'nitti': (90, {'no'}), 'hundre': (100, {'no'}), 'tjue': (20, {'no'}),
 }
 
 # Mistake puns organized by severity

@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*- 
 """Discord bot client and message handling."""
 
 import os

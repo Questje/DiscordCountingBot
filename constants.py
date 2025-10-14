@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*- 
 """Constants and configuration for the counting bot."""
 
 import math

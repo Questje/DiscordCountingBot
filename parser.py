@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*- 
 """Number parsing and interpretation logic for the counting bot."""
 
 import re

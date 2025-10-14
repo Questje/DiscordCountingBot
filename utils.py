@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*- 
 """Utility functions for the counting bot."""
 
 import random

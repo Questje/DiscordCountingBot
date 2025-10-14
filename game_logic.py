@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*- 
 """Game logic and state management for the counting bot."""
 
 import os

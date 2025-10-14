@@ -63,7 +63,10 @@ def format_leaderboard_embed():
         percentage = (s['correct'] / total * 100) if total > 0 else 0
         leaderboard_lines.append(
           # Temporary version without emojis
-          f"**{i}.** {s['username']} - OK: **{s['correct']}** - FAIL: {s['wrong']} - {percentage:.1f}%"
+          f"**{i}.** {s['username']} \u2022 \u2705 **{s['correct']}** \u2022 "
+          f"\u274C {s['wrong']} \u2022 {percentage:.1f}%"
+
+          #f"**{i}.** {s['username']} - OK: **{s['correct']}** - FAIL: {s['wrong']} - {percentage:.1f}%"
           # f"**{i}.** {s['username']} • ✅ **{s['correct']}** • "
           # f"❌ {s['wrong']} • {percentage:.1f}%"
         )

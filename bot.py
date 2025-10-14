@@ -62,8 +62,7 @@ def format_leaderboard_embed():
         total = s['correct'] + s['wrong']
         percentage = (s['correct'] / total * 100) if total > 0 else 0
         leaderboard_lines.append(
-            f"**{i}.** {s['username']} • ✅ **{s['correct']}** • "
-            f"❌ {s['wrong']} • {percentage:.1f}%"
+            f"**{i}.** {s['username']} • ✅ **{s['correct']}** • X {s['wrong']} • {percentage:.1f}%"
         )
     
     if leaderboard_lines:

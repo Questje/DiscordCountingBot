@@ -8,7 +8,7 @@ import asyncio
 import random
 from datetime import datetime
 from constants import LANGUAGE_FLAGS, ACHIEVEMENT_EMOJIS
-from parser import parse_number_with_context
+from parser import parse_number_with_context, parse_multiple_numbers_with_context
 from utils import (get_mistake_message, get_streak_message, check_user_timeout,
                    apply_timeout)
 import game_logic
@@ -16,9 +16,10 @@ import game_logic
 # Load environment variables
 from dotenv import load_dotenv
 load_dotenv('.env')
-TOKEN = os.getenv("TOKEN") 
-CHANNEL_ID = 1250289722937315353  # DEV (Dev Server)
-#CHANNEL_ID = 1413124693392625846   # PROD (Questje's Hangout - #counting)
+
+# Environment-based configuration
+TOKEN = os.getenv("TOKEN_DEV") if os.getenv("ENVIRONMENT") == "dev" else os.getenv("TOKEN_PROD")
+CHANNEL_ID = int(os.getenv("CHANNEL_DEV")) if os.getenv("ENVIRONMENT") == "dev" else int(os.getenv("CHANNEL_PROD"))
 
 # Discord client setup
 intents = discord.Intents.default()
@@ -65,10 +66,6 @@ def format_leaderboard_embed():
           # Temporary version without emojis
           f"**{i}.** {s['username']} \u2022 \u2705 **{s['correct']}** \u2022 "
           f"\u274C {s['wrong']} \u2022 {percentage:.1f}%"
-
-          #f"**{i}.** {s['username']} - OK: **{s['correct']}** - FAIL: {s['wrong']} - {percentage:.1f}%"
-          # f"**{i}.** {s['username']} • ✅ **{s['correct']}** • "
-          # f"❌ {s['wrong']} • {percentage:.1f}%"
         )
     
     if leaderboard_lines:
@@ -158,7 +155,8 @@ async def on_ready():
     """Handle bot ready event."""
     global bot_ready
     bot_ready = True
-    print(f'✅ Logged in as {client.user}')
+    env_mode = os.getenv("ENVIRONMENT", "unknown")
+    print(f'✅ Logged in as {client.user} (Environment: {env_mode})')
     game_logic.load_state()
     client.loop.create_task(periodic_save_task())
     
@@ -251,11 +249,18 @@ async def on_message(message):
                     )
             return
         
-        # Parse number from message
+        # Try parsing multiple numbers first
         current_expected = game_state['next_number']
-        parsed_number, types_used, parse_method, random_info, languages = parse_number_with_context(
+        parsed_numbers, types_used, parse_method, random_info, languages, count = parse_multiple_numbers_with_context(
             content, current_expected
         )
+        
+        # Handle random info announcements
+        if random_info:
+            announcements = [f"random({int(min_v)},{int(max_v)}) = {result}" 
+                           for min_v, max_v, result in random_info]
+            if announcements:
+                await message.channel.send(f"🎲 Random rolls: {', '.join(announcements)}")
         
         if parse_method == 'evaluation_timeout':
             await message.add_reaction('🤯')
@@ -265,18 +270,10 @@ async def on_message(message):
             )
             return
         
-        if random_info:
-            announcements = [f"random({int(min_v)},{int(max_v)}) = {result}" 
-                           for min_v, max_v, result in random_info]
-            if announcements:
-                await message.channel.send(f"🎲 Random rolls: {', '.join(announcements)}")
-        
-        if parsed_number is not None:
+        if parsed_numbers is not None and len(parsed_numbers) > 0:
             with game_logic.SHARED_DATA_LOCK:
-                is_correct = (parsed_number == current_expected)
-                
                 # Check for back-to-back answers
-                if (is_correct and game_state['last_correct_user'] == message.author.id 
+                if (game_state['last_correct_user'] == message.author.id 
                     and not game_state['testing_mode']):
                     
                     violations = user_stat.get('back_to_back_violations', 0) + 1
@@ -300,73 +297,160 @@ async def on_message(message):
                         )
                     return
                 
-                if is_correct:
+                # Process all correct consecutive numbers
+                for num in parsed_numbers:
                     game_logic.process_correct_answer(
                         message.author.id, message.author.display_name,
-                        parsed_number, content, types_used, parse_method, languages
+                        num, content, types_used, parse_method, languages
                     )
-                    
-                    await message.add_reaction('✅')
-                    
-                    # Add language flag reactions for all detected languages
-                    for lang in languages:
-                        if lang in LANGUAGE_FLAGS:
-                            await message.add_reaction(LANGUAGE_FLAGS[lang])
-                    
-                    # Check for polyglot achievement (4+ languages)
-                    if len(languages) >= 4:
-                        await message.channel.send(
-                            f"🗣️ **POLYGLOT!** {message.author.display_name} just used {len(languages)} different languages in one expression! Amazing linguistic skills! 🌍"
-                        )
-                    
-                    # Add achievement emoji reactions based on types used
-                    added_emojis = set()  # Track added emojis to avoid duplicates
-                    
-                    for type_used in types_used:
-                        if type_used in ACHIEVEMENT_EMOJIS and ACHIEVEMENT_EMOJIS[type_used] not in added_emojis:
-                            try:
-                                await message.add_reaction(ACHIEVEMENT_EMOJIS[type_used])
-                                added_emojis.add(ACHIEVEMENT_EMOJIS[type_used])
-                            except discord.errors.HTTPException:
-                                pass  # Ignore if we can't add more reactions
-                    
-                    streak_message, new_milestone = get_streak_message(
-                        game_logic.total_correct, game_logic.last_streak_milestone
-                    )
-                    if streak_message:
-                        game_logic.last_streak_milestone = new_milestone
-                        await message.channel.send(streak_message)
-                    
-                    print(f'✅ Correct: "{content}" → {parsed_number} by {message.author.display_name}')
-                    print(f'   Types used: {types_used}')
-                    print(f'   Languages: {languages}')
                 
-                else:
-                    should_reset = random.choice([True, False])
-                    game_logic.process_wrong_answer(
-                        message.author.id, message.author.display_name, should_reset
+                # Add reactions
+                await message.add_reaction('✅')
+                
+                # Add special reaction for multiple numbers
+                if count > 1:
+                    await message.add_reaction('🔢')
+                
+                # Add language flag reactions for all detected languages
+                for lang in languages:
+                    if lang in LANGUAGE_FLAGS:
+                        await message.add_reaction(LANGUAGE_FLAGS[lang])
+                
+                # Check for polyglot achievement (4+ languages)
+                if len(languages) >= 4:
+                    await message.channel.send(
+                        f"🗣️ **POLYGLOT!** {message.author.display_name} just used {len(languages)} different languages in one expression! Amazing linguistic skills! 🌍"
                     )
-                    
-                    await message.add_reaction('❌')
-                    pun_message = get_mistake_message(user_stat)
-                    await message.channel.send(pun_message)
-                    
-                    if should_reset:
-                        await message.channel.send(
-                            f"🪙 **Coin flip: HEADS!** 💀 The game resets! Start from **1** again!"
-                        )
-                    else:
-                        await message.channel.send(
-                            f"🪙 **Coin flip: TAILS!** 😅 Phew, the counting continues!"
-                        )
-                    
-                    print(f'❌ Wrong: "{content}" → {parsed_number}, expected {current_expected} '
-                          f'by {message.author.display_name}')
+                
+                # Check for multiple numbers achievement
+                if count > 1:
+                    await message.channel.send(
+                        f"🔢 **MULTIPLE!** {message.author.display_name} just answered {count} consecutive numbers at once! Impressive! 🎯"
+                    )
+                
+                # Add achievement emoji reactions based on types used
+                added_emojis = set()
+                
+                for type_used in types_used:
+                    if type_used in ACHIEVEMENT_EMOJIS and ACHIEVEMENT_EMOJIS[type_used] not in added_emojis:
+                        try:
+                            await message.add_reaction(ACHIEVEMENT_EMOJIS[type_used])
+                            added_emojis.add(ACHIEVEMENT_EMOJIS[type_used])
+                        except discord.errors.HTTPException:
+                            pass
+                
+                streak_message, new_milestone = get_streak_message(
+                    game_logic.total_correct, game_logic.last_streak_milestone
+                )
+                if streak_message:
+                    game_logic.last_streak_milestone = new_milestone
+                    await message.channel.send(streak_message)
+                
+                if count > 1:
+                    print(f'✅ Correct (Multiple x{count}): "{content}" → {parsed_numbers} by {message.author.display_name}')
+                else:
+                    print(f'✅ Correct: "{content}" → {parsed_numbers[0]} by {message.author.display_name}')
+                print(f'   Types used: {types_used}')
+                print(f'   Languages: {languages}')
         else:
-            print(f'🔸 Ignoring non-parseable message: "{content}"')
+            # Try single number parsing as fallback
+            parsed_number, types_used, parse_method, random_info, languages = parse_number_with_context(
+                content, current_expected
+            )
+            
+            if parsed_number is not None:
+                with game_logic.SHARED_DATA_LOCK:
+                    is_correct = (parsed_number == current_expected)
+                    
+                    if (is_correct and game_state['last_correct_user'] == message.author.id 
+                        and not game_state['testing_mode']):
+                        
+                        violations = user_stat.get('back_to_back_violations', 0) + 1
+                        game_logic.update_user_stats(message.author.id, message.author.display_name, False)
+                        game_logic.user_stats[message.author.id]['back_to_back_violations'] = violations
+                        
+                        await message.add_reaction('🚫')
+                        
+                        if violations >= 5:
+                            game_logic.user_stats[message.author.id] = apply_timeout(
+                                game_logic.user_stats[message.author.id], 30
+                            )
+                            await message.channel.send(
+                                f"⏰ {message.author.display_name}, you're in timeout! "
+                                f"30 seconds for answering back-to-back 5 times!"
+                            )
+                        else:
+                            await message.channel.send(
+                                f"⚠️ Hey {message.author.display_name}! You can't answer twice in a row. "
+                                f"That counts as a wrong answer!"
+                            )
+                        return
+                    
+                    if is_correct:
+                        game_logic.process_correct_answer(
+                            message.author.id, message.author.display_name,
+                            parsed_number, content, types_used, parse_method, languages
+                        )
+                        
+                        await message.add_reaction('✅')
+                        
+                        for lang in languages:
+                            if lang in LANGUAGE_FLAGS:
+                                await message.add_reaction(LANGUAGE_FLAGS[lang])
+                        
+                        if len(languages) >= 4:
+                            await message.channel.send(
+                                f"🗣️ **POLYGLOT!** {message.author.display_name} just used {len(languages)} different languages in one expression! Amazing linguistic skills! 🌍"
+                            )
+                        
+                        added_emojis = set()
+                        
+                        for type_used in types_used:
+                            if type_used in ACHIEVEMENT_EMOJIS and ACHIEVEMENT_EMOJIS[type_used] not in added_emojis:
+                                try:
+                                    await message.add_reaction(ACHIEVEMENT_EMOJIS[type_used])
+                                    added_emojis.add(ACHIEVEMENT_EMOJIS[type_used])
+                                except discord.errors.HTTPException:
+                                    pass
+                        
+                        streak_message, new_milestone = get_streak_message(
+                            game_logic.total_correct, game_logic.last_streak_milestone
+                        )
+                        if streak_message:
+                            game_logic.last_streak_milestone = new_milestone
+                            await message.channel.send(streak_message)
+                        
+                        print(f'✅ Correct: "{content}" → {parsed_number} by {message.author.display_name}')
+                        print(f'   Types used: {types_used}')
+                        print(f'   Languages: {languages}')
+                    
+                    else:
+                        should_reset = random.choice([True, False])
+                        game_logic.process_wrong_answer(
+                            message.author.id, message.author.display_name, should_reset
+                        )
+                        
+                        await message.add_reaction('❌')
+                        pun_message = get_mistake_message(user_stat)
+                        await message.channel.send(pun_message)
+                        
+                        if should_reset:
+                            await message.channel.send(
+                                f"🪙 **Coin flip: HEADS!** 💀 The game resets! Start from **1** again!"
+                            )
+                        else:
+                            await message.channel.send(
+                                f"🪙 **Coin flip: TAILS!** 😅 Phew, the counting continues!"
+                            )
+                        
+                        print(f'❌ Wrong: "{content}" → {parsed_number}, expected {current_expected} '
+                              f'by {message.author.display_name}')
+            else:
+                print(f'🔸 Ignoring non-parseable message: "{content}"')
 
 
 def run():
     """Run the Discord bot."""
-    print('🚀 Starting Discord Counting Bot...')
+    env_mode = os.getenv("ENVIRONMENT", "unknown")
+    print(f'🚀 Starting Discord Counting Bot (Environment: {env_mode})...')
     client.run(TOKEN)

@@ -102,7 +102,8 @@ def starts_with_parseable(text):
     if re.match(r'^\d', text) or re.match(r'^[(\-+:]', text) or text.startswith(('sqrt(', 'random(')):
         return True
     
-    first_token_match = re.match(r'^([a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅ]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅ]+)*)[+\-*/:()%^]?', text)
+    first_token_match = re.match(r'^([a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)*)[+\-*/:()%^]?', text)
+
     if first_token_match:
         first_word = first_token_match.group(1)
         clean_word = re.sub(r'[^\w\-]', '', first_word)
@@ -174,8 +175,8 @@ def preprocess_expression(text):
         text = re.sub(r'\b' + re.escape(constant) + r'\b', str(value), text, flags=re.IGNORECASE)
     
     words_with_pos = [(m.group(), m.start(), m.end()) 
-                      for m in re.finditer(r'\b[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅ]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅ]+)*\b', text)]
-    
+                  for m in re.finditer(r'\b[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)*\b', text)]
+
     for word, start_pos, end_pos in reversed(words_with_pos):
         multilang_result = try_parse_multilang_number(word.lower())
         if multilang_result is not None:
@@ -270,7 +271,8 @@ def analyze_input_types(original_text):
             types.add('constants')
             break
     
-    words = re.findall(r'\b[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅ]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅ]+)*\b', original_text)
+    words = re.findall(r'\b[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)*\b', original_text)
+
     for word in words:
         if try_parse_multilang_number(word.lower()) is not None:
             types.add('multilang')
@@ -529,3 +531,61 @@ def parse_number_with_context(text, expected_number):
     
     value, interp_type, desc, random_info, languages = interpretations[0]
     return value, analyze_input_types(text), f'fallback_{interp_type}', random_info, languages
+
+
+def parse_multiple_numbers_with_context(text, expected_start):
+    """
+    Parse up to 10 consecutive numbers from text.
+    Returns: (list of numbers, combined_types, parse_method, random_info, languages, count)
+    Returns None if parsing fails or numbers aren't consecutive.
+    """
+    text = text.strip()
+    
+    # Split by common delimiters while preserving math expressions
+    # We need to be careful not to split math expressions like "3+2"
+    parts = re.split(r'\s+', text)
+    
+    parsed_numbers = []
+    all_types = set()
+    all_languages = set()
+    all_random_info = []
+    
+    current_expected = expected_start
+    
+    for i, part in enumerate(parts):
+        if i >= 10:  # Limit to 10 numbers
+            break
+            
+        part = part.strip()
+        if not part:
+            continue
+        
+        # Parse this part
+        num, types, method, random_info, languages = parse_number_with_context(part, current_expected)
+        
+        # If parsing failed or number doesn't match expected
+        if num is None or num != current_expected:
+            # If we haven't parsed any numbers yet, this is a complete failure
+            if not parsed_numbers:
+                return None, set(), 'failed', None, set(), 0
+            # Otherwise, we're done parsing consecutive numbers
+            break
+        
+        # Valid consecutive number
+        parsed_numbers.append(num)
+        all_types.update(types)
+        all_languages.update(languages)
+        if random_info:
+            all_random_info.extend(random_info)
+        
+        current_expected += 1
+    
+    if not parsed_numbers:
+        return None, set(), 'failed', None, set(), 0
+    
+    # Add 'multiple' type if more than one number
+    if len(parsed_numbers) > 1:
+        all_types.add('multiple')
+    
+    return (parsed_numbers, all_types, 'multiple_consecutive' if len(parsed_numbers) > 1 else 'single', 
+            all_random_info if all_random_info else None, all_languages, len(parsed_numbers))

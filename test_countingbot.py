@@ -522,6 +522,123 @@ class CountingBotTest(unittest.TestCase):
         result2, _, _, _, _ = parse_number_with_context("10:2", 5)
         self.assertEqual(result1, result2)
 
+    def test_multiple_consecutive_simple(self):
+        """Test parsing multiple consecutive numbers - simple digits"""
+        from parser import parse_multiple_numbers_with_context
+        
+        # Test "4 5 6" when expecting 4
+        parsed_numbers, types, method, random_info, languages, count = parse_multiple_numbers_with_context("4 5 6", 4)
+        self.assertEqual(parsed_numbers, [4, 5, 6])
+        self.assertEqual(count, 3)
+        self.assertIn('multiple', types)
+        self.assertEqual(method, 'multiple_consecutive')
+
+    def test_multiple_consecutive_with_words(self):
+        """Test parsing multiple consecutive numbers - mix of digits and words"""
+        from parser import parse_multiple_numbers_with_context
+        
+        # Test "4 five six" when expecting 4
+        parsed_numbers, types, method, random_info, languages, count = parse_multiple_numbers_with_context("4 five six", 4)
+        self.assertEqual(parsed_numbers, [4, 5, 6])
+        self.assertEqual(count, 3)
+        self.assertIn('multiple', types)
+        self.assertIn('en', languages)
+
+    def test_multiple_consecutive_with_math(self):
+        """Test parsing multiple consecutive numbers with math expressions"""
+        from parser import parse_multiple_numbers_with_context
+        
+        # Test "3+2 3+3" when expecting 5 (should parse as 5, 6)
+        parsed_numbers, types, method, random_info, languages, count = parse_multiple_numbers_with_context("3+2 3+3", 5)
+        self.assertEqual(parsed_numbers, [5, 6])
+        self.assertEqual(count, 2)
+        self.assertIn('multiple', types)
+        self.assertIn('math', types)
+
+    def test_multiple_consecutive_fails_non_consecutive(self):
+        """Test that non-consecutive numbers fail"""
+        from parser import parse_multiple_numbers_with_context
+        
+        # Test "3+3 3+5 9 10" when expecting 6 - should fail because 8 is missing
+        parsed_numbers, types, method, random_info, languages, count = parse_multiple_numbers_with_context("3+3 3+5 9 10", 6)
+        # Should parse 6, 8 and stop (because 9 != 9 expected, wait it should work up to 8)
+        # Actually: 3+3=6, 3+5=8, but we expect 6,7,8... so 3+5=8 when expecting 7 will fail
+        # So it should only get [6] then stop
+        self.assertEqual(parsed_numbers, [6])
+        self.assertEqual(count, 1)
+
+    def test_multiple_consecutive_limit_10(self):
+        """Test that multiple numbers are limited to 10"""
+        from parser import parse_multiple_numbers_with_context
+        
+        # Test 12 consecutive numbers, should only parse 10
+        text = " ".join(str(i) for i in range(1, 13))  # "1 2 3 4 5 6 7 8 9 10 11 12"
+        parsed_numbers, types, method, random_info, languages, count = parse_multiple_numbers_with_context(text, 1)
+        self.assertEqual(len(parsed_numbers), 10)
+        self.assertEqual(parsed_numbers, list(range(1, 11)))
+        self.assertEqual(count, 10)
+        self.assertIn('multiple', types)
+
+    def test_japanese_numbers_hiragana(self):
+        """Test parsing of Japanese numbers in Hiragana"""
+        # Basic hiragana
+        result, types, method, random_info, languages = parse_number_with_context("なな", 7)
+        self.assertEqual(result, 7)
+        self.assertIn('multilang', types)
+        self.assertIn('ja', languages)
+        
+        # Larger number
+        result, types, method, random_info, languages = parse_number_with_context("にじゅうさん", 23)
+        self.assertEqual(result, 23)
+        self.assertIn('ja', languages)
+
+    def test_japanese_numbers_katakana(self):
+        """Test parsing of Japanese numbers in Katakana"""
+        result, types, method, random_info, languages = parse_number_with_context("ナナ", 7)
+        self.assertEqual(result, 7)
+        self.assertIn('multilang', types)
+        self.assertIn('ja', languages)
+
+    def test_japanese_numbers_kanji(self):
+        """Test parsing of Japanese numbers in Kanji"""
+        # Single digit
+        result, types, method, random_info, languages = parse_number_with_context("七", 7)
+        self.assertEqual(result, 7)
+        self.assertIn('ja', languages)
+        
+        # Double digit
+        result, types, method, random_info, languages = parse_number_with_context("二十三", 23)
+        self.assertEqual(result, 23)
+        self.assertIn('ja', languages)
+        
+        # 100
+        result, types, method, random_info, languages = parse_number_with_context("百", 100)
+        self.assertEqual(result, 100)
+        self.assertIn('ja', languages)
+
+    def test_japanese_numbers_romaji(self):
+        """Test parsing of Japanese numbers in Romaji"""
+        result, types, method, random_info, languages = parse_number_with_context("nana", 7)
+        self.assertEqual(result, 7)
+        self.assertIn('ja', languages)
+        
+        result, types, method, random_info, languages = parse_number_with_context("nijuusan", 23)
+        self.assertEqual(result, 23)
+        self.assertIn('ja', languages)
+
+    def test_japanese_in_expressions(self):
+        """Test Japanese numbers in mathematical expressions"""
+        # Hi + katakana
+        result, types, method, random_info, languages = parse_number_with_context("さん + ヨン", 7)  # 3 + 4
+        self.assertEqual(result, 7)
+        self.assertIn('math', types)
+        self.assertIn('ja', languages)
+        
+        # Kanji with sqrt
+        result, types, method, random_info, languages = parse_number_with_context("sqrt(十六)", 4)  # sqrt(16)
+        self.assertEqual(result, 4)
+        self.assertIn('sqrt', types)
+        self.assertIn('ja', languages)
 
 if __name__ == '__main__':
     # Run all tests

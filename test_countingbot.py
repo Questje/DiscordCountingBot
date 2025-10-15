@@ -640,6 +640,114 @@ class CountingBotTest(unittest.TestCase):
         self.assertIn('sqrt', types)
         self.assertIn('ja', languages)
 
+    def test_roman_numerals_basic(self):
+        """Test basic Roman numeral parsing - UPPERCASE only"""
+        # Basic Roman numerals
+        result, types, method, random_info, languages = parse_number_with_context("I", 1)
+        self.assertEqual(result, 1)
+        self.assertIn('roman', types)
+        self.assertIn('la', languages)
+        
+        result, types, method, random_info, languages = parse_number_with_context("V", 5)
+        self.assertEqual(result, 5)
+        self.assertIn('roman', types)
+        self.assertIn('la', languages)
+        
+        result, types, method, random_info, languages = parse_number_with_context("X", 10)
+        self.assertEqual(result, 10)
+        self.assertIn('roman', types)
+        
+        result, types, method, random_info, languages = parse_number_with_context("L", 50)
+        self.assertEqual(result, 50)
+        self.assertIn('roman', types)
+        
+        result, types, method, random_info, languages = parse_number_with_context("C", 100)
+        self.assertEqual(result, 100)
+        self.assertIn('roman', types)
+
+    def test_roman_numerals_compound(self):
+        """Test compound Roman numerals"""
+        # Test LX = 60
+        result, types, method, random_info, languages = parse_number_with_context("LX", 60)
+        self.assertEqual(result, 60)
+        self.assertIn('roman', types)
+        self.assertIn('la', languages)
+        
+        # Test XXIII = 23
+        result, types, method, random_info, languages = parse_number_with_context("XXIII", 23)
+        self.assertEqual(result, 23)
+        self.assertIn('roman', types)
+        
+        # Test XC = 90 (subtractive)
+        result, types, method, random_info, languages = parse_number_with_context("XC", 90)
+        self.assertEqual(result, 90)
+        self.assertIn('roman', types)
+        
+        # Test XCIX = 99
+        result, types, method, random_info, languages = parse_number_with_context("XCIX", 99)
+        self.assertEqual(result, 99)
+        self.assertIn('roman', types)
+
+    def test_roman_numerals_case_sensitive(self):
+        """Test that Roman numerals are case-sensitive (lowercase should not work)"""
+        # Lowercase should NOT be parsed as Roman numerals
+        result, types, method, random_info, languages = parse_number_with_context("v", 5)
+        # Should either fail or parse as something else, but NOT as Roman numeral
+        if result is not None:
+            self.assertNotIn('roman', types)
+            self.assertNotIn('la', languages)
+        
+        result, types, method, random_info, languages = parse_number_with_context("lx", 60)
+        if result is not None:
+            self.assertNotIn('roman', types)
+            self.assertNotIn('la', languages)
+
+    def test_roman_numerals_in_math_expressions(self):
+        """Test Roman numerals used in mathematical expressions"""
+        # V + III = 8
+        result, types, method, random_info, languages = parse_number_with_context("V + III", 8)
+        self.assertEqual(result, 8)
+        self.assertIn('math', types)
+        self.assertIn('roman', types)
+        self.assertIn('la', languages)
+        
+        # X * II = 20
+        result, types, method, random_info, languages = parse_number_with_context("X * II", 20)
+        self.assertEqual(result, 20)
+        self.assertIn('math', types)
+        self.assertIn('roman', types)
+        
+        # L - XX = 30
+        result, types, method, random_info, languages = parse_number_with_context("L - XX", 30)
+        self.assertEqual(result, 30)
+        self.assertIn('math', types)
+        self.assertIn('roman', types)
+
+    def test_roman_numerals_mixed_with_other_languages(self):
+        """Test Roman numerals mixed with other language numbers"""
+        # VII + trois = 10 (7 + 3)
+        result, types, method, random_info, languages = parse_number_with_context("VII + trois", 10)
+        self.assertEqual(result, 10)
+        self.assertIn('math', types)
+        self.assertIn('roman', types)
+        self.assertIn('la', languages)
+        self.assertIn('fr', languages)
+        
+        # X + zeven = 17 (10 + 7)
+        result, types, method, random_info, languages = parse_number_with_context("X + zeven", 17)
+        self.assertEqual(result, 17)
+        self.assertIn('math', types)
+        self.assertIn('la', languages)
+        self.assertIn('nl', languages)
+        
+        # sqrt(XVI) + five = 9 (sqrt(16) + 5 = 4 + 5)
+        result, types, method, random_info, languages = parse_number_with_context("sqrt(XVI) + five", 9)
+        self.assertEqual(result, 9)
+        self.assertIn('sqrt', types)
+        self.assertIn('roman', types)
+        self.assertIn('la', languages)
+        self.assertIn('en', languages)
+        
 if __name__ == '__main__':
     # Run all tests
     unittest.main(verbosity=2)

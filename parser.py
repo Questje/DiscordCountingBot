@@ -8,7 +8,7 @@ import random
 import concurrent.futures
 from word2number import w2n
 from simpleeval import simple_eval, NumberTooHigh
-from constants import MATH_CONSTANTS, MULTILANG_NUMBERS
+from constants import MATH_CONSTANTS, MULTILANG_NUMBERS, ROMAN_NUMERALS
 
 # Thread pool for safe expression evaluation
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
@@ -28,6 +28,42 @@ def calculate_factorial(n):
     if n < 0 or n > 20:
         return None
     return math.factorial(n)
+
+
+def try_parse_roman_numeral(text):
+    """
+    Try to parse a Roman numeral (CASE-SENSITIVE - must be UPPERCASE).
+    Returns the integer value if valid, None otherwise.
+    """
+    # Must be uppercase and only contain valid Roman numeral characters
+    if not text or not text.isupper():
+        return None
+    
+    if not all(c in 'IVXLCDM' for c in text):
+        return None
+    
+    # Check direct lookup first (for common values up to 100)
+    if text in ROMAN_NUMERALS:
+        return ROMAN_NUMERALS[text]
+    
+    # For values > 100 or not in our lookup table, calculate manually
+    roman_values = {'I': 1, 'V': 5, 'X': 10, 'L': 50, 'C': 100, 'D': 500, 'M': 1000}
+    
+    total = 0
+    prev_value = 0
+    
+    for char in reversed(text):
+        value = roman_values.get(char, 0)
+        if value == 0:
+            return None
+        
+        if value < prev_value:
+            total -= value
+        else:
+            total += value
+        prev_value = value
+    
+    return total if total > 0 else None
 
 
 def process_factorials(text):
@@ -97,12 +133,19 @@ def is_compound_number_word(text):
 
 def starts_with_parseable(text):
     """Check if text starts with something parseable."""
-    text = text.strip().lower()
+    text_stripped = text.strip()
+    text_lower = text_stripped.lower()
     
-    if re.match(r'^\d', text) or re.match(r'^[(\-+:]', text) or text.startswith(('sqrt(', 'random(')):
+    if re.match(r'^\d', text_stripped) or re.match(r'^[(\-+:]', text_stripped) or text_lower.startswith(('sqrt(', 'random(')):
         return True
     
-    first_token_match = re.match(r'^([a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)*)[+\-*/:()%^]?', text)
+    # Check for Roman numerals (must be at start and uppercase)
+    roman_match = re.match(r'^([IVXLCDM]+)', text_stripped)
+    if roman_match:
+        if try_parse_roman_numeral(roman_match.group(1)) is not None:
+            return True
+    
+    first_token_match = re.match(r'^([a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)*)[+\-*/:()%^]?', text_lower)
 
     if first_token_match:
         first_word = first_token_match.group(1)
@@ -163,7 +206,6 @@ def preprocess_expression(text):
     """Preprocess mathematical expression for evaluation."""
     languages_used = set()
     text = text.replace('^', '**')
-    # Replace colon with division
     text = text.replace(':', '/')
     
     def replace_sqrt(match):
@@ -174,6 +216,17 @@ def preprocess_expression(text):
     for constant, value in MATH_CONSTANTS.items():
         text = re.sub(r'\b' + re.escape(constant) + r'\b', str(value), text, flags=re.IGNORECASE)
     
+    # Extract and replace Roman numerals (CASE-SENSITIVE - must find uppercase sequences)
+    roman_pattern = r'\b([IVXLCDM]+)\b'
+    roman_matches_with_pos = [(m.group(), m.start(), m.end()) 
+                               for m in re.finditer(roman_pattern, text)]
+    
+    for roman_text, start_pos, end_pos in reversed(roman_matches_with_pos):
+        roman_value = try_parse_roman_numeral(roman_text)
+        if roman_value is not None:
+            text = text[:start_pos] + str(roman_value) + text[end_pos:]
+            languages_used.add('la')  # Latin
+    
     words_with_pos = [(m.group(), m.start(), m.end()) 
                   for m in re.finditer(r'\b[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)*\b', text)]
 
@@ -182,7 +235,7 @@ def preprocess_expression(text):
         if multilang_result is not None:
             num_val, langs = multilang_result
             text = text[:start_pos] + str(num_val) + text[end_pos:]
-            languages_used.update(langs)  # Add all languages for this word
+            languages_used.update(langs)
             continue
         
         try:
@@ -208,6 +261,12 @@ def extract_first_number_from_text(text):
     for match in re.finditer(r'\b(\d+)\b', text):
         found_numbers.append((int(match.group(1)), match.start(), 'digit', set()))
     
+    # Find Roman numerals (CASE-SENSITIVE)
+    for match in re.finditer(r'\b([IVXLCDM]+)\b', text):
+        roman_value = try_parse_roman_numeral(match.group(1))
+        if roman_value is not None:
+            found_numbers.append((roman_value, match.start(), 'roman', {'la'}))
+    
     # Find multilang numbers
     words = text.lower().split()
     for i, word in enumerate(words):
@@ -224,7 +283,6 @@ def extract_first_number_from_text(text):
         current_pos = 0
         for i, word in enumerate(words):
             clean_word = re.sub(r'[^\w\-]', '', word)
-            # Skip if it's a hyphenated non-compound
             if '-' in clean_word and not is_valid_compound_word(clean_word):
                 continue
             try:
@@ -232,7 +290,7 @@ def extract_first_number_from_text(text):
                 word_pos = text.lower().find(word.lower(), current_pos)
                 found_numbers.append((num, word_pos, 'english', {'en'}))
                 current_pos = word_pos + len(word)
-                break  # Take the first one
+                break
             except ValueError:
                 pass
     
@@ -240,10 +298,8 @@ def extract_first_number_from_text(text):
     valid_numbers = [(num, pos, typ, langs) for num, pos, typ, langs in found_numbers if num > 0]
     
     if valid_numbers:
-        # Sort by position to get the first one
         valid_numbers.sort(key=lambda x: x[1])
         first_num, first_pos, first_type, first_langs = valid_numbers[0]
-        # CRITICAL: Only return languages from the FIRST extracted number
         return first_num, first_pos, first_langs
     
     return None, None, set()
@@ -252,6 +308,14 @@ def extract_first_number_from_text(text):
 def analyze_input_types(original_text):
     """Analyze and categorize the types of input in the text."""
     types = set()
+    
+    # Check for Roman numerals
+    if re.search(r'\b[IVXLCDM]+\b', original_text):
+        # Verify it's actually a valid Roman numeral
+        for match in re.finditer(r'\b([IVXLCDM]+)\b', original_text):
+            if try_parse_roman_numeral(match.group(1)) is not None:
+                types.add('roman')
+                break
     
     if re.search(r'(\d+|[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅ]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅ]+)*)!', original_text):
         types.add('factorial')
@@ -287,7 +351,6 @@ def analyze_input_types(original_text):
     if re.search(r'\d+[.,]\d+', original_text):
         types.add('decimal')
     
-    # Ensure 'integer' type is added when we have simple integers
     if not types and re.match(r'^\d+$', original_text.strip()):
         types.add('integer')
     
@@ -377,10 +440,18 @@ def get_all_possible_interpretations(text):
     processed_text, random_values = process_random_functions(text)
     all_languages = set()
     
+    # Check for Roman numerals first (before other processing)
+    roman_match = re.match(r'^([IVXLCDM]+)(?:\s|$)', processed_text)
+    if roman_match:
+        roman_value = try_parse_roman_numeral(roman_match.group(1))
+        if roman_value is not None and roman_value > 0:
+            interpretations.append((roman_value, 'roman', f'Roman: {text} → {roman_value}', 
+                                  random_values, {'la'}))
+    
+    # [Rest of the existing code remains the same...]
     # Check if it could be interpreted as hyphenated math
     if '-' in processed_text and can_be_hyphenated_math(processed_text):
         try:
-            # Try as hyphenated math (e.g., "twenty-one" as 20-1=19)
             math_version = processed_text.replace('-', ' - ')
             expr_processed, expr_languages = preprocess_expression(math_version)
             all_languages_math = set(expr_languages)
@@ -427,12 +498,10 @@ def get_all_possible_interpretations(text):
             pass
     
     # Try as compound word or written number
-    # Only if it's a valid compound word OR doesn't contain hyphens
     if '-' not in processed_text or is_valid_compound_word(processed_text):
         try:
             for attempt_text in [processed_text, 
                                 re.sub(r'\s+', ' ', processed_text.strip())]:
-                # Skip long phrases that might contain multiple numbers
                 if len(attempt_text.split()) > 3:
                     continue
                     
@@ -472,7 +541,7 @@ def get_all_possible_interpretations(text):
                                           random_values, langs))
     
     return interpretations
-
+    
 
 def parse_number_with_context(text, expected_number):
     """Parse a number from text with context awareness."""

@@ -25,6 +25,12 @@ DB_CONFIG = {
     'cursorclass': DictCursor
 }
 
+# Check if we're in development mode
+IS_DEV_MODE = os.getenv('ENVIRONMENT').lower() in ('dev')
+
+if IS_DEV_MODE:
+    print("⚠️  DEVELOPMENT MODE - Database writes are DISABLED")
+
 # State variables (cache)
 next_number = 1
 user_stats = {}
@@ -50,6 +56,10 @@ def get_db_connection():
 
 def _write_game_state_to_db(game_state_copy):
     """Write game state to database (run in thread to avoid blocking)."""
+    if IS_DEV_MODE:
+        print(f"🔧 DEV MODE: Skipping game state save to database")
+        return
+    
     try:
         conn = get_db_connection()
         with conn.cursor() as cursor:
@@ -77,6 +87,10 @@ def _write_game_state_to_db(game_state_copy):
 
 def _write_user_stats_to_db(user_id, stats):
     """Write user stats to database (run in thread to avoid blocking)."""
+    if IS_DEV_MODE:
+        print(f"🔧 DEV MODE: Skipping user stats save for user {user_id}")
+        return
+    
     try:
         conn = get_db_connection()
         with conn.cursor() as cursor:
@@ -116,6 +130,10 @@ def _write_user_stats_to_db(user_id, stats):
 
 def save_state():
     """Schedule game state to be saved without blocking."""
+    if IS_DEV_MODE:
+        print(f"🔧 DEV MODE: Skipping save_state()")
+        return
+    
     with SHARED_DATA_LOCK:
         game_state_copy = {
             'next_number': next_number,
@@ -137,6 +155,10 @@ def save_state():
 def load_state():
     """Load game state and user stats from database."""
     global next_number, user_stats, last_correct_user, total_correct, last_streak_milestone, testing_mode
+    
+    if IS_DEV_MODE:
+        print(f"🔧 DEV MODE: Skipping load_state() from database, using defaults")
+        return
     
     with SHARED_DATA_LOCK:
         try:
@@ -200,7 +222,10 @@ def reset_game(preserve_stats=True):
             user_stats.clear()
             number_history.clear()
         
-        save_state()
+        if not IS_DEV_MODE:
+            save_state()
+        else:
+            print(f"🔧 DEV MODE: Skipping save after reset")
 
 
 def update_user_stats(user_id, username, correct):
@@ -233,8 +258,11 @@ def update_user_stats(user_id, username, correct):
         stats['streak'] = 0
         stats['consecutive_wrong'] += 1
     
-    # Save to database asynchronously
-    executor.submit(_write_user_stats_to_db, user_id, stats.copy())
+    # Save to database asynchronously (only if not in dev mode)
+    if not IS_DEV_MODE:
+        executor.submit(_write_user_stats_to_db, user_id, stats.copy())
+    else:
+        print(f"🔧 DEV MODE: Skipping user stats update for {username}")
 
 
 def add_to_history(number, username, input_text, types_used, parse_method):
@@ -263,7 +291,8 @@ def get_game_state():
             'total_correct': total_correct,
             'testing_mode': testing_mode,
             'user_stats': dict(user_stats),
-            'history': list(number_history)
+            'history': list(number_history),
+            'is_dev_mode': IS_DEV_MODE
         }
 
 
@@ -291,14 +320,17 @@ def process_correct_answer(user_id, username, parsed_number, content, types_used
     add_to_history(parsed_number, username, content, types_used, parse_method)
     next_number += 1
     
-    # Save game state to database
-    executor.submit(_write_game_state_to_db, {
-        'next_number': next_number,
-        'last_correct_user': last_correct_user,
-        'total_correct': total_correct,
-        'last_streak_milestone': last_streak_milestone,
-        'testing_mode': testing_mode,
-    })
+    # Save game state to database (only if not in dev mode)
+    if not IS_DEV_MODE:
+        executor.submit(_write_game_state_to_db, {
+            'next_number': next_number,
+            'last_correct_user': last_correct_user,
+            'total_correct': total_correct,
+            'last_streak_milestone': last_streak_milestone,
+            'testing_mode': testing_mode,
+        })
+    else:
+        print(f"🔧 DEV MODE: Skipping game state save after correct answer")
     
     return True
 
@@ -315,14 +347,17 @@ def process_wrong_answer(user_id, username, should_reset):
         last_correct_user = None
         total_correct = 0
         
-        # Save game state to database
-        executor.submit(_write_game_state_to_db, {
-            'next_number': next_number,
-            'last_correct_user': last_correct_user,
-            'total_correct': total_correct,
-            'last_streak_milestone': last_streak_milestone,
-            'testing_mode': testing_mode,
-        })
+        # Save game state to database (only if not in dev mode)
+        if not IS_DEV_MODE:
+            executor.submit(_write_game_state_to_db, {
+                'next_number': next_number,
+                'last_correct_user': last_correct_user,
+                'total_correct': total_correct,
+                'last_streak_milestone': last_streak_milestone,
+                'testing_mode': testing_mode,
+            })
+        else:
+            print(f"🔧 DEV MODE: Skipping game state save after wrong answer")
         
         return True
     

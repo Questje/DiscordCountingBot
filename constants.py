@@ -24,6 +24,7 @@ ACHIEVEMENT_EMOJIS = {
     'tr': '🇹🇷',
     'dk': '🇩🇰',
     'cy': '🏴󠁧󠁢󠁷󠁬󠁳󠁿',
+    'es': '🇪🇸',
     'no': '🇳🇴',
     'ja': '🇯🇵',
     'la': '🏛️', 
@@ -48,6 +49,7 @@ LANGUAGE_FLAGS = {
     'tr': '🇹🇷',
     'dk': '🇩🇰',
     'cy': '🏴󠁧󠁢󠁷󠁬󠁳󠁿',
+    'es': '🇪🇸',
     'no': '🇳🇴',
     'ja': '🇯🇵',
     'la': '🏛️',
@@ -89,7 +91,45 @@ MULTILANG_NUMBERS = {
     'vingt-huit': (28, {'fr'}), 'vingt-neuf': (29, {'fr'}), 'trente': (30, {'fr'}), 'quarante': (40, {'fr'}), 
     'cinquante': (50, {'fr'}), 'soixante': (60, {'fr'}), 'soixante-dix': (70, {'fr'}), 'quatre-vingt': (80, {'fr'}), 
     'quatre-vingt-dix': (90, {'fr'}), 'quatre-vingts': (80, {'fr'}), 'cent': (100, {'fr', 'cy'}),
-    
+
+    # Spanish (0 - 100)
+    'cero': (0, {'es'}),
+    'uno': (1, {'es'}), 'un': (1, {'es'}),
+    'dos': (2, {'es'}), 'tres': (3, {'es'}), 'cuatro': (4, {'es'}), 'cinco': (5, {'es'}),
+    'seis': (6, {'es'}), 'siete': (7, {'es'}), 'ocho': (8, {'es'}), 'nueve': (9, {'es'}),
+    'diez': (10, {'es'}), 'once': (11, {'es'}), 'doce': (12, {'es'}), 'trece': (13, {'es'}),
+    'catorce': (14, {'es'}), 'quince': (15, {'es'}), 'dieciseis': (16, {'es'}), 'dieciséis': (16, {'es'}),
+    'diecisiete': (17, {'es'}), 'dieciocho': (18, {'es'}), 'diecinueve': (19, {'es'}), 'veinte': (20, {'es'}),
+
+    # 21-29 variants
+    'veintiuno': (21, {'es'}), 'veintiún': (21, {'es'}), 'veintidos': (22, {'es'}), 'veintidós': (22, {'es'}),
+    'veintitres': (23, {'es'}), 'veintitrés': (23, {'es'}), 'veinticuatro': (24, {'es'}), 'veinticinco': (25, {'es'}),
+    'veintiseis': (26, {'es'}), 'veintiséis': (26, {'es'}), 'veintisiete': (27, {'es'}), 'veintiocho': (28, {'es'}), 'veintinueve': (29, {'es'}),
+
+    # Tens and combinations with ' y '
+    'treinta': (30, {'es'}), 'treinta y uno': (31, {'es'}), 'treinta y dos': (32, {'es'}), 'treinta y tres': (33, {'es'}),
+    'treinta y cuatro': (34, {'es'}), 'treinta y cinco': (35, {'es'}), 'treinta y seis': (36, {'es'}), 'treinta y siete': (37, {'es'}),
+    'treinta y ocho': (38, {'es'}), 'treinta y nueve': (39, {'es'}),
+    'cuarenta': (40, {'es'}), 'cuarenta y uno': (41, {'es'}), 'cuarenta y dos': (42, {'es'}), 'cuarenta y tres': (43, {'es'}),
+    'cuarenta y cuatro': (44, {'es'}), 'cuarenta y cinco': (45, {'es'}), 'cuarenta y seis': (46, {'es'}), 'cuarenta y siete': (47, {'es'}),
+    'cuarenta y ocho': (48, {'es'}), 'cuarenta y nueve': (49, {'es'}),
+    'cincuenta': (50, {'es'}), 'cincuenta y uno': (51, {'es'}), 'cincuenta y dos': (52, {'es'}), 'cincuenta y tres': (53, {'es'}),
+    'cincuenta y cuatro': (54, {'es'}), 'cincuenta y cinco': (55, {'es'}), 'cincuenta y seis': (56, {'es'}), 'cincuenta y siete': (57, {'es'}),
+    'cincuenta y ocho': (58, {'es'}), 'cincuenta y nueve': (59, {'es'}),
+    'sesenta': (60, {'es'}), 'sesenta y uno': (61, {'es'}), 'sesenta y dos': (62, {'es'}), 'sesenta y tres': (63, {'es'}),
+    'sesenta y cuatro': (64, {'es'}), 'sesenta y cinco': (65, {'es'}), 'sesenta y seis': (66, {'es'}), 'sesenta y siete': (67, {'es'}),
+    'sesenta y ocho': (68, {'es'}), 'sesenta y nueve': (69, {'es'}),
+    'setenta': (70, {'es'}), 'setenta y uno': (71, {'es'}), 'setenta y dos': (72, {'es'}), 'setenta y tres': (73, {'es'}),
+    'setenta y cuatro': (74, {'es'}), 'setenta y cinco': (75, {'es'}), 'setenta y seis': (76, {'es'}), 'setenta y siete': (77, {'es'}),
+    'setenta y ocho': (78, {'es'}), 'setenta y nueve': (79, {'es'}),
+    'ochenta': (80, {'es'}), 'ochenta y uno': (81, {'es'}), 'ochenta y dos': (82, {'es'}), 'ochenta y tres': (83, {'es'}),
+    'ochenta y cuatro': (84, {'es'}), 'ochenta y cinco': (85, {'es'}), 'ochenta y seis': (86, {'es'}), 'ochenta y siete': (87, {'es'}),
+    'ochenta y ocho': (88, {'es'}), 'ochenta y nueve': (89, {'es'}),
+    'noventa': (90, {'es'}), 'noventa y uno': (91, {'es'}), 'noventa y dos': (92, {'es'}), 'noventa y tres': (93, {'es'}),
+    'noventa y cuatro': (94, {'es'}), 'noventa y cinco': (95, {'es'}), 'noventa y seis': (96, {'es'}), 'noventa y siete': (97, {'es'}),
+    'noventa y ocho': (98, {'es'}), 'noventa y nueve': (99, {'es'}),
+    'cien': (100, {'es'}), 'ciento': (100, {'es'}),
+
     # German
     'null': (0, {'de', 'no'}), 'eins': (1, {'de'}), 'zwei': (2, {'de'}), 'drei': (3, {'de', 'nl'}), 
     'fünf': (5, {'de'}), 'fuenf': (5, {'de'}), 'funf': (5, {'de'}), 
@@ -130,14 +170,16 @@ MULTILANG_NUMBERS = {
     'seksen': (80, {'tr'}), 'doksan': (90, {'tr'}), 'yüz': (100, {'tr'}), 'yuz': (100, {'tr'}),
     
     # Danish (shared words already defined above, only Danish-specific words here)
-    'nul': (0, {'dk'}), 'en': (1, {'dk', 'no'}), 'et': (1, {'dk'}), 'to': (2, {'dk', 'no'}), 'fire': (4, {'dk', 'no'}),
+    # NOTE: some words overlap with other languages (e.g. 'nul' and 'tres').
+    # Merge language tags so overlapping words include all relevant language codes.
+    'nul': (0, {'dk', 'nl'}), 'en': (1, {'dk', 'no'}), 'et': (1, {'dk'}), 'to': (2, {'dk', 'no'}), 'fire': (4, {'dk', 'no'}),
     'seks': (6, {'dk', 'no'}), 'syv': (7, {'dk', 'no'}), 'otte': (8, {'dk'}), 'ni': (9, {'dk', 'no'}), 'ti': (10, {'dk', 'no'}),
     'elleve': (11, {'dk', 'no'}), 'tretten': (13, {'dk', 'no'}), 'fjorten': (14, {'dk', 'no'}), 'femten': (15, {'dk'}),
     'seksten': (16, {'dk', 'no'}), 'sytten': (17, {'dk', 'no'}), 'søtten': (17, {'no'}), 'atten': (18, {'dk', 'no'}), 'nitten': (19, {'dk', 'no'}), 'tyve': (20, {'dk', 'no'}),
     'enogtyve': (21, {'dk'}), 'toog': (22, {'dk'}), 'treogtyve': (23, {'dk'}), 'fireogtyve': (24, {'dk'}),
     'femogtyve': (25, {'dk'}), 'seksogtyve': (26, {'dk'}), 'syvogtyve': (27, {'dk'}), 'otteogtyve': (28, {'dk'}),
     'niogtyve': (29, {'dk'}), 'tredive': (30, {'dk'}), 'fyrre': (40, {'dk'}), 'fyrretyve': (40, {'dk'}),
-    'halvtreds': (50, {'dk'}), 'tres': (60, {'dk'}), 'halvfjerds': (70, {'dk'}), 'firs': (80, {'dk'}),
+    'halvtreds': (50, {'dk'}), 'tres': (60, {'dk', 'es'}), 'halvfjerds': (70, {'dk'}), 'firs': (80, {'dk'}),
     'halvfems': (90, {'dk'}), 'hundrede': (100, {'dk'}),
     
     # Welsh

@@ -98,6 +98,18 @@ def try_parse_multilang_number(text):
             combined_langs = tens_langs.union(ones_langs)
             if tens_val in [20, 30, 40, 50, 60, 70, 80, 90] and 1 <= ones_val <= 9:
                 return (tens_val + ones_val, combined_langs)
+
+    # Spanish style 'tens y ones' e.g. 'treinta y cuatro'
+    if ' y ' in clean_text:
+        parts = [p.strip() for p in clean_text.split(' y ')]
+        if len(parts) == 2:
+            tens_word, ones_word = parts[0], parts[1]
+            if tens_word in MULTILANG_NUMBERS and ones_word in MULTILANG_NUMBERS:
+                tens_val, tens_langs = MULTILANG_NUMBERS[tens_word]
+                ones_val, ones_langs = MULTILANG_NUMBERS[ones_word]
+                combined_langs = tens_langs.union(ones_langs)
+                if tens_val in [20, 30, 40, 50, 60, 70, 80, 90] and 1 <= ones_val <= 9:
+                    return (tens_val + ones_val, combined_langs)
     
     if clean_text.startswith('soixante-'):
         remainder = clean_text[9:]
@@ -151,7 +163,8 @@ def starts_with_parseable(text):
         first_word = first_token_match.group(1)
         clean_word = re.sub(r'[^\w\-]', '', first_word)
         
-        if clean_word.lower() in MATH_CONSTANTS or clean_word in MULTILANG_NUMBERS:
+        # Use lowercase when checking multilingual numbers dictionary keys
+        if clean_word.lower() in MATH_CONSTANTS or clean_word.lower() in MULTILANG_NUMBERS:
             return True
         
         try:

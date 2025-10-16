@@ -231,6 +231,41 @@ class CountingBotTest(unittest.TestCase):
         self.assertEqual(num, 7)  # Should extract "zeven" (7), not "zes" (6)
         self.assertIsInstance(languages, set)  # Now returns a set
         self.assertIn('nl', languages)  # Check if 'nl' is in the set
+    
+    def test_spanish_numbers_simple(self):
+        """Test basic Spanish number words"""
+        result, types, method, random_info, languages = parse_number_with_context("uno", 1)
+        self.assertEqual(result, 1)
+        self.assertIn('es', languages)
+
+        result, types, method, random_info, languages = parse_number_with_context("dos", 2)
+        self.assertEqual(result, 2)
+        self.assertIn('es', languages)
+
+    def test_spanish_compound_veintiuno(self):
+        """Test Spanish compound forms like veintiuno"""
+        result, types, method, random_info, languages = parse_number_with_context("veintiuno", 21)
+        self.assertEqual(result, 21)
+        self.assertIn('es', languages)
+
+    def test_spanish_treinta_y_cuatro(self):
+        """Test Spanish 'treinta y cuatro' compound with spaces"""
+        result, types, method, random_info, languages = parse_number_with_context("treinta y cuatro", 34)
+        self.assertEqual(result, 34)
+        self.assertIn('es', languages)
+
+    def test_spanish_mixed_math(self):
+        """Test math mixing Spanish words and constants"""
+        # 'dos + pi' -> 2 + ~3.14 -> ~5, rounded to 5
+        result, types, method, random_info, languages = parse_number_with_context("dos + pi", 5)
+        self.assertEqual(result, 5)
+        self.assertIn('es', languages)
+
+    def test_spanish_extraction_in_sentence(self):
+        """Extract Spanish number from sentence"""
+        num, pos, langs = extract_first_number_from_text("veinte es mayor que diez")
+        self.assertEqual(num, 20)
+        self.assertIn('es', langs)
         
     def test_complex_multilingual_expressions(self):
         """Test complex mathematical expressions with multiple languages and operations"""

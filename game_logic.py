@@ -25,8 +25,9 @@ DB_CONFIG = {
     'cursorclass': DictCursor
 }
 
-# Check if we're in development mode
-IS_DEV_MODE = os.getenv('ENVIRONMENT').lower() in ('dev')
+# Check if we're in development mode (be defensive if ENVIRONMENT is not set)
+_env_val = os.getenv('ENVIRONMENT', '')
+IS_DEV_MODE = _env_val.lower() in ('dev', 'development', 'local')
 
 if IS_DEV_MODE:
     print("⚠️  DEVELOPMENT MODE - Database writes are DISABLED")

@@ -5,6 +5,7 @@
 import os
 import json
 import threading
+import time
 from datetime import datetime
 from dotenv import load_dotenv
 import pymysql
@@ -42,8 +43,26 @@ total_correct = 0
 testing_mode = False
 
 # Thread safety
-SHARED_DATA_LOCK = threading.Lock()
+SHARED_DATA_LOCK = threading.RLock()  # Use RLock to allow recursive locking
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+
+class TimedLock:
+    """Context manager for acquiring locks with timeout."""
+    def __init__(self, lock, timeout=5.0):
+        self.lock = lock
+        self.timeout = timeout
+        self.acquired = False
+    
+    def __enter__(self):
+        self.acquired = self.lock.acquire(timeout=self.timeout)
+        if not self.acquired:
+            raise TimeoutError(f"Could not acquire lock within {self.timeout} seconds")
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self.acquired:
+            self.lock.release()
 
 
 def get_db_connection():
@@ -135,7 +154,14 @@ def save_state():
         print(f"🔧 DEV MODE: Skipping save_state()")
         return
     
-    with SHARED_DATA_LOCK:
+    # Try to acquire lock with timeout to prevent deadlocks
+    lock_acquired = SHARED_DATA_LOCK.acquire(timeout=5.0)
+    if not lock_acquired:
+        print(f"⚠️ Warning: Could not acquire lock for save_state after 5 seconds, skipping save")
+        return
+    
+    try:
+        # Copy all data while holding the lock once
         game_state_copy = {
             'next_number': next_number,
             'last_correct_user': last_correct_user,
@@ -143,14 +169,16 @@ def save_state():
             'last_streak_milestone': last_streak_milestone,
             'testing_mode': testing_mode,
         }
+        user_stats_copy = {uid: stats.copy() for uid, stats in user_stats.items()}
+    finally:
+        SHARED_DATA_LOCK.release()
     
-    # Save game state
+    # Save game state (without holding lock)
     executor.submit(_write_game_state_to_db, game_state_copy)
     
-    # Save all user stats
-    with SHARED_DATA_LOCK:
-        for uid, stats in user_stats.items():
-            executor.submit(_write_user_stats_to_db, uid, stats.copy())
+    # Save all user stats (without holding lock)
+    for uid, stats in user_stats_copy.items():
+        executor.submit(_write_user_stats_to_db, uid, stats)
 
 
 def load_state():
@@ -161,72 +189,98 @@ def load_state():
         print(f"🔧 DEV MODE: Skipping load_state() from database, using defaults")
         return
     
-    with SHARED_DATA_LOCK:
-        try:
-            conn = get_db_connection()
+    # Load data from database first (without holding lock)
+    loaded_game_state = None
+    loaded_user_stats = {}
+    
+    try:
+        conn = get_db_connection()
+        
+        # Load game state
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM game_state WHERE id = 1")
+            game_state = cursor.fetchone()
             
-            # Load game state
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM game_state WHERE id = 1")
-                game_state = cursor.fetchone()
+            if game_state:
+                loaded_game_state = {
+                    'next_number': game_state['next_number'],
+                    'last_correct_user': game_state['last_correct_user'],
+                    'total_correct': game_state['total_correct'],
+                    'last_streak_milestone': game_state['last_streak_milestone'],
+                    'testing_mode': bool(game_state['testing_mode'])
+                }
+                print(f"✅ Loaded game state from database.")
+            else:
+                print("⚠️ No game state found in database, using defaults.")
+        
+        # Load user stats
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT * FROM user_stats")
+            users = cursor.fetchall()
+            
+            for user in users:
+                user_id = user['user_id']
+                achievements = set(json.loads(user['achievements'])) if user['achievements'] else set()
                 
-                if game_state:
-                    next_number = game_state['next_number']
-                    last_correct_user = game_state['last_correct_user']
-                    total_correct = game_state['total_correct']
-                    last_streak_milestone = game_state['last_streak_milestone']
-                    testing_mode = bool(game_state['testing_mode'])
-                    print(f"✅ Loaded game state from database.")
-                else:
-                    print("⚠️ No game state found in database, using defaults.")
+                loaded_user_stats[user_id] = {
+                    'username': user['username'],
+                    'correct': user['correct'],
+                    'wrong': user['wrong'],
+                    'streak': user['streak'],
+                    'best_streak': user['best_streak'],
+                    'achievements': achievements,
+                    'consecutive_wrong': user['consecutive_wrong'],
+                    'back_to_back_violations': user['back_to_back_violations'],
+                    'timeout_until': user['timeout_until']
+                }
             
-            # Load user stats
-            with conn.cursor() as cursor:
-                cursor.execute("SELECT * FROM user_stats")
-                users = cursor.fetchall()
-                
-                for user in users:
-                    user_id = user['user_id']
-                    achievements = set(json.loads(user['achievements'])) if user['achievements'] else set()
-                    
-                    user_stats[user_id] = {
-                        'username': user['username'],
-                        'correct': user['correct'],
-                        'wrong': user['wrong'],
-                        'streak': user['streak'],
-                        'best_streak': user['best_streak'],
-                        'achievements': achievements,
-                        'consecutive_wrong': user['consecutive_wrong'],
-                        'back_to_back_violations': user['back_to_back_violations'],
-                        'timeout_until': user['timeout_until']
-                    }
-                
-                print(f"✅ Loaded {len(user_stats)} user records from database.")
+            print(f"✅ Loaded {len(loaded_user_stats)} user records from database.")
+        
+        conn.close()
+        
+    except Exception as e:
+        print(f"⚠️ Could not load state from database, starting fresh. Reason: {e}")
+        return
+    
+    # Now update the shared state with the loaded data (holding lock briefly)
+    try:
+        with TimedLock(SHARED_DATA_LOCK, timeout=5.0):
+            if loaded_game_state:
+                next_number = loaded_game_state['next_number']
+                last_correct_user = loaded_game_state['last_correct_user']
+                total_correct = loaded_game_state['total_correct']
+                last_streak_milestone = loaded_game_state['last_streak_milestone']
+                testing_mode = loaded_game_state['testing_mode']
             
-            conn.close()
-            
-        except Exception as e:
-            print(f"⚠️ Could not load state from database, starting fresh. Reason: {e}")
+            user_stats.clear()
+            user_stats.update(loaded_user_stats)
+    except TimeoutError as e:
+        print(f"❌ Error: {e} - Could not update game state after loading from database")
 
 
 def reset_game(preserve_stats=True):
     """Reset the game state."""
     global next_number, last_correct_user, last_streak_milestone, total_correct
     
-    with SHARED_DATA_LOCK:
-        next_number = 1
-        last_correct_user = None
-        last_streak_milestone = 0
-        total_correct = 0
-        
-        if not preserve_stats:
-            user_stats.clear()
-            number_history.clear()
-        
-        if not IS_DEV_MODE:
-            save_state()
-        else:
-            print(f"🔧 DEV MODE: Skipping save after reset")
+    try:
+        with TimedLock(SHARED_DATA_LOCK, timeout=5.0):
+            next_number = 1
+            last_correct_user = None
+            last_streak_milestone = 0
+            total_correct = 0
+            
+            if not preserve_stats:
+                user_stats.clear()
+                number_history.clear()
+    except TimeoutError as e:
+        print(f"❌ Error: {e} - Could not reset game")
+        return
+    
+    # Call save_state after releasing the lock
+    if not IS_DEV_MODE:
+        save_state()
+    else:
+        print(f"🔧 DEV MODE: Skipping save after reset")
 
 
 def update_user_stats(user_id, username, correct):
@@ -285,16 +339,20 @@ def add_to_history(number, username, input_text, types_used, parse_method):
 
 def get_game_state():
     """Get current game state (thread-safe)."""
-    with SHARED_DATA_LOCK:
-        return {
-            'next_number': next_number,
-            'last_correct_user': last_correct_user,
-            'total_correct': total_correct,
-            'testing_mode': testing_mode,
-            'user_stats': dict(user_stats),
-            'history': list(number_history),
-            'is_dev_mode': IS_DEV_MODE
-        }
+    try:
+        with TimedLock(SHARED_DATA_LOCK, timeout=5.0):
+            return {
+                'next_number': next_number,
+                'last_correct_user': last_correct_user,
+                'total_correct': total_correct,
+                'testing_mode': testing_mode,
+                'user_stats': dict(user_stats),
+                'history': list(number_history),
+                'is_dev_mode': IS_DEV_MODE
+            }
+    except TimeoutError as e:
+        print(f"❌ Error: {e} - Could not get game state")
+        return None
 
 
 def process_correct_answer(user_id, username, parsed_number, content, types_used, parse_method, languages):

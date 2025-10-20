@@ -151,11 +151,33 @@ def starts_with_parseable(text):
     if re.match(r'^\d', text_stripped) or re.match(r'^[(\-+:]', text_stripped) or text_lower.startswith(('sqrt(', 'random(')):
         return True
     
-    # Check for Roman numerals (must be at start and uppercase)
-    roman_match = re.match(r'^([IVXLCDM]+)', text_stripped)
-    if roman_match:
-        if try_parse_roman_numeral(roman_match.group(1)) is not None:
-            return True
+    # Check for Roman numerals - only if the ENTIRE first word/token is Roman numerals
+    # This prevents "I am great" from being parsed but allows standalone "I" or "XV"
+    # Match Roman numerals followed by space, end of string, or math operator
+    first_word_match = re.match(r'^([IVXLCDM]+)(?:\s|$|[+\-*/:()%^])', text_stripped)
+    if first_word_match:
+        full_roman = first_word_match.group(1)
+        remaining_text = text_stripped[len(full_roman):]
+        
+        # Only consider it parseable if:
+        # 1. It's the entire text (e.g., just "I" or "XV")
+        # 2. It's followed immediately by a math operator (e.g., "X+2")
+        # 3. It's NOT followed by regular words with a space (prevents "I am" from being parsed)
+        
+        if not remaining_text:  # Standalone Roman numeral
+            if try_parse_roman_numeral(full_roman) is not None:
+                return True
+        elif remaining_text[0:1] in '+\-*/:()%^':  # Immediately followed by operator
+            if try_parse_roman_numeral(full_roman) is not None:
+                return True
+        # If followed by space and then a word, check if it's a math operation
+        elif remaining_text.startswith(' ') and len(remaining_text.strip()) > 0:
+            # Check if what follows is an operator or number, not regular text
+            next_part = remaining_text.strip()
+            if re.match(r'^[+\-*/:()%^]', next_part) or re.match(r'^\d', next_part):
+                if try_parse_roman_numeral(full_roman) is not None:
+                    return True
+            # Otherwise it's regular text like "I am", don't parse
     
     first_token_match = re.match(r'^([a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)*)[+\-*/:()%^]?', text_lower)
 

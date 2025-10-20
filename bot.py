@@ -12,6 +12,7 @@ from parser import parse_number_with_context, parse_multiple_numbers_with_contex
 from utils import (get_mistake_message, get_streak_message, check_user_timeout,
                    apply_timeout)
 import game_logic
+from game_logic import TimedLock
 
 # Load environment variables
 from dotenv import load_dotenv
@@ -147,7 +148,9 @@ async def periodic_save_task():
     await client.wait_until_ready()
     while not client.is_closed():
         await asyncio.sleep(300)
-        game_logic.save_state()
+        # Run save_state in a thread to avoid blocking the event loop
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, game_logic.save_state)
 
 
 @client.event
@@ -195,17 +198,25 @@ async def on_message(message):
         
         # Handle commands
         if content.lower() == '!testing':
-            with game_logic.SHARED_DATA_LOCK:
-                game_logic.testing_mode = not game_logic.testing_mode
-            status = "enabled" if game_logic.testing_mode else "disabled"
+            try:
+                with TimedLock(game_logic.SHARED_DATA_LOCK, timeout=2.0):
+                    game_logic.testing_mode = not game_logic.testing_mode
+                    status = "enabled" if game_logic.testing_mode else "disabled"
+            except TimeoutError:
+                await message.channel.send("⚠️ System is busy, please try again.")
+                return
             await message.channel.send(f"🧪 **Testing mode {status}!**")
-            game_logic.save_state()
+            # Run save_state in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, game_logic.save_state)
             return
         
         if content.lower() in ['!lb', '!stats', '!leaderboard']:
             embed = format_leaderboard_embed()
             await message.channel.send(embed=embed)
-            game_logic.save_state()
+            # Run save_state in executor to avoid blocking
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, game_logic.save_state)
             return
         
         if content.lower().startswith('!profile'):
@@ -271,31 +282,34 @@ async def on_message(message):
             return
         
         if parsed_numbers is not None and len(parsed_numbers) > 0:
-            with game_logic.SHARED_DATA_LOCK:
-                # Check for back-to-back answers
-                if (game_state['last_correct_user'] == message.author.id 
-                    and not game_state['testing_mode']):
-                    
-                    violations = user_stat.get('back_to_back_violations', 0) + 1
-                    game_logic.update_user_stats(message.author.id, message.author.display_name, False)
-                    game_logic.user_stats[message.author.id]['back_to_back_violations'] = violations
-                    
-                    await message.add_reaction('🚫')
-                    
-                    if violations >= 5:
-                        game_logic.user_stats[message.author.id] = apply_timeout(
-                            game_logic.user_stats[message.author.id], 30
-                        )
-                        await message.channel.send(
-                            f"⏰ {message.author.display_name}, you're in timeout! "
-                            f"30 seconds for answering back-to-back 5 times!"
-                        )
-                    else:
-                        await message.channel.send(
-                            f"⚠️ Hey {message.author.display_name}! You can't answer twice in a row. "
-                            f"That counts as a wrong answer!"
-                        )
-                    return
+            try:
+                with TimedLock(game_logic.SHARED_DATA_LOCK, timeout=2.0):
+                    # Check for back-to-back answers
+                    if (game_state['last_correct_user'] == message.author.id 
+                        and not game_state['testing_mode']):
+                        
+                        violations = user_stat.get('back_to_back_violations', 0) + 1
+                        game_logic.update_user_stats(message.author.id, message.author.display_name, False)
+                        game_logic.user_stats[message.author.id]['back_to_back_violations'] = violations
+                        
+                        await message.add_reaction('🚫')
+                        
+                        if violations >= 5:
+                            game_logic.user_stats[message.author.id] = apply_timeout(
+                                game_logic.user_stats[message.author.id], 30
+                            )
+                            await message.channel.send(
+                                f"⏰ {message.author.display_name}, you're in timeout! "
+                                f"30 seconds for answering back-to-back 5 times!"
+                            )
+                        else:
+                            error_detail = f"(You sent {parsed_numbers} which {'were' if len(parsed_numbers) > 1 else 'was'} correct, but you went twice in a row)"
+                            await message.channel.send(
+                                f"⚠️ Hey {message.author.display_name}! You can't answer twice in a row. "
+                                f"That counts as a wrong answer!\n"
+                                f"📊 {error_detail}"
+                            )
+                        return
                 
                 # Process all correct consecutive numbers
                 for num in parsed_numbers:
@@ -352,6 +366,9 @@ async def on_message(message):
                     print(f'✅ Correct: "{content}" → {parsed_numbers[0]} by {message.author.display_name}')
                 print(f'   Types used: {types_used}')
                 print(f'   Languages: {languages}')
+            except TimeoutError:
+                await message.channel.send("⚠️ System is busy, please try again.")
+                return
         else:
             # Try single number parsing as fallback
             parsed_number, types_used, parse_method, random_info, languages = parse_number_with_context(
@@ -359,92 +376,102 @@ async def on_message(message):
             )
             
             if parsed_number is not None:
-                with game_logic.SHARED_DATA_LOCK:
-                    is_correct = (parsed_number == current_expected)
-                    
-                    if (is_correct and game_state['last_correct_user'] == message.author.id 
-                        and not game_state['testing_mode']):
+                try:
+                    with TimedLock(game_logic.SHARED_DATA_LOCK, timeout=2.0):
+                        is_correct = (parsed_number == current_expected)
                         
-                        violations = user_stat.get('back_to_back_violations', 0) + 1
-                        game_logic.update_user_stats(message.author.id, message.author.display_name, False)
-                        game_logic.user_stats[message.author.id]['back_to_back_violations'] = violations
+                        if (is_correct and game_state['last_correct_user'] == message.author.id 
+                            and not game_state['testing_mode']):
+                            
+                            violations = user_stat.get('back_to_back_violations', 0) + 1
+                            game_logic.update_user_stats(message.author.id, message.author.display_name, False)
+                            game_logic.user_stats[message.author.id]['back_to_back_violations'] = violations
+                            
+                            await message.add_reaction('🚫')
+                            
+                            if violations >= 5:
+                                game_logic.user_stats[message.author.id] = apply_timeout(
+                                    game_logic.user_stats[message.author.id], 30
+                                )
+                                await message.channel.send(
+                                    f"⏰ {message.author.display_name}, you're in timeout! "
+                                    f"30 seconds for answering back-to-back 5 times!"
+                                )
+                            else:
+                                error_detail = f"(You sent `{parsed_number}` which was correct, but you went twice in a row)"
+                                await message.channel.send(
+                                    f"⚠️ Hey {message.author.display_name}! You can't answer twice in a row. "
+                                    f"That counts as a wrong answer!\n"
+                                    f"📊 {error_detail}"
+                                )
+                            return
                         
-                        await message.add_reaction('🚫')
-                        
-                        if violations >= 5:
-                            game_logic.user_stats[message.author.id] = apply_timeout(
-                                game_logic.user_stats[message.author.id], 30
+                        if is_correct:
+                            game_logic.process_correct_answer(
+                                message.author.id, message.author.display_name,
+                                parsed_number, content, types_used, parse_method, languages
                             )
-                            await message.channel.send(
-                                f"⏰ {message.author.display_name}, you're in timeout! "
-                                f"30 seconds for answering back-to-back 5 times!"
+                            
+                            await message.add_reaction('✅')
+                            
+                            for lang in languages:
+                                if lang in LANGUAGE_FLAGS:
+                                    await message.add_reaction(LANGUAGE_FLAGS[lang])
+                            
+                            if len(languages) >= 4:
+                                await message.channel.send(
+                                    f"🗣️ **POLYGLOT!** {message.author.display_name} just used {len(languages)} different languages in one expression! Amazing linguistic skills! 🌍"
+                                )
+                            
+                            added_emojis = set()
+                            
+                            for type_used in types_used:
+                                if type_used in ACHIEVEMENT_EMOJIS and ACHIEVEMENT_EMOJIS[type_used] not in added_emojis:
+                                    try:
+                                        await message.add_reaction(ACHIEVEMENT_EMOJIS[type_used])
+                                        added_emojis.add(ACHIEVEMENT_EMOJIS[type_used])
+                                    except discord.errors.HTTPException:
+                                        pass
+                            
+                            streak_message, new_milestone = get_streak_message(
+                                game_logic.total_correct, game_logic.last_streak_milestone
                             )
+                            if streak_message:
+                                game_logic.last_streak_milestone = new_milestone
+                                await message.channel.send(streak_message)
+                            
+                            print(f'✅ Correct: "{content}" → {parsed_number} by {message.author.display_name}')
+                            print(f'   Types used: {types_used}')
+                            print(f'   Languages: {languages}')
+                        
                         else:
-                            await message.channel.send(
-                                f"⚠️ Hey {message.author.display_name}! You can't answer twice in a row. "
-                                f"That counts as a wrong answer!"
+                            should_reset = random.choice([True, False])
+                            game_logic.process_wrong_answer(
+                                message.author.id, message.author.display_name, should_reset
                             )
-                        return
-                    
-                    if is_correct:
-                        game_logic.process_correct_answer(
-                            message.author.id, message.author.display_name,
-                            parsed_number, content, types_used, parse_method, languages
-                        )
-                        
-                        await message.add_reaction('✅')
-                        
-                        for lang in languages:
-                            if lang in LANGUAGE_FLAGS:
-                                await message.add_reaction(LANGUAGE_FLAGS[lang])
-                        
-                        if len(languages) >= 4:
-                            await message.channel.send(
-                                f"🗣️ **POLYGLOT!** {message.author.display_name} just used {len(languages)} different languages in one expression! Amazing linguistic skills! 🌍"
-                            )
-                        
-                        added_emojis = set()
-                        
-                        for type_used in types_used:
-                            if type_used in ACHIEVEMENT_EMOJIS and ACHIEVEMENT_EMOJIS[type_used] not in added_emojis:
-                                try:
-                                    await message.add_reaction(ACHIEVEMENT_EMOJIS[type_used])
-                                    added_emojis.add(ACHIEVEMENT_EMOJIS[type_used])
-                                except discord.errors.HTTPException:
-                                    pass
-                        
-                        streak_message, new_milestone = get_streak_message(
-                            game_logic.total_correct, game_logic.last_streak_milestone
-                        )
-                        if streak_message:
-                            game_logic.last_streak_milestone = new_milestone
-                            await message.channel.send(streak_message)
-                        
-                        print(f'✅ Correct: "{content}" → {parsed_number} by {message.author.display_name}')
-                        print(f'   Types used: {types_used}')
-                        print(f'   Languages: {languages}')
-                    
-                    else:
-                        should_reset = random.choice([True, False])
-                        game_logic.process_wrong_answer(
-                            message.author.id, message.author.display_name, should_reset
-                        )
-                        
-                        await message.add_reaction('❌')
-                        pun_message = get_mistake_message(user_stat)
-                        await message.channel.send(pun_message)
-                        
-                        if should_reset:
-                            await message.channel.send(
-                                f"🪙 **Coin flip: HEADS!** 💀 The game resets! Start from **1** again!"
-                            )
-                        else:
-                            await message.channel.send(
-                                f"🪙 **Coin flip: TAILS!** 😅 Phew, the counting continues!"
-                            )
-                        
-                        print(f'❌ Wrong: "{content}" → {parsed_number}, expected {current_expected} '
-                              f'by {message.author.display_name}')
+                            
+                            await message.add_reaction('❌')
+                            pun_message = get_mistake_message(user_stat)
+                            
+                            # Add explanation of what went wrong
+                            error_explanation = f"📊 **Mistake Details:** You sent `{parsed_number}` but we needed `{current_expected}`."
+                            full_message = f"{pun_message}\n{error_explanation}"
+                            await message.channel.send(full_message)
+                            
+                            if should_reset:
+                                await message.channel.send(
+                                    f"🪙 **Coin flip: HEADS!** 💀 The game resets! Start from **1** again!"
+                                )
+                            else:
+                                await message.channel.send(
+                                    f"🪙 **Coin flip: TAILS!** 😅 Phew, the counting continues!"
+                                )
+                            
+                            print(f'❌ Wrong: "{content}" → {parsed_number}, expected {current_expected} '
+                                  f'by {message.author.display_name}')
+                except TimeoutError:
+                    await message.channel.send("⚠️ System is busy, please try again.")
+                    return
             else:
                 print(f'🔸 Ignoring non-parseable message: "{content}"')
 

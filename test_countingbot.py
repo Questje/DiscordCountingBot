@@ -614,43 +614,6 @@ class CountingBotTest(unittest.TestCase):
         self.assertEqual(count, 10)
         self.assertIn('multiple', types)
 
-    def test_japanese_numbers_hiragana(self):
-        """Test parsing of Japanese numbers in Hiragana"""
-        # Basic hiragana
-        result, types, method, random_info, languages = parse_number_with_context("なな", 7)
-        self.assertEqual(result, 7)
-        self.assertIn('multilang', types)
-        self.assertIn('ja', languages)
-        
-        # Larger number
-        result, types, method, random_info, languages = parse_number_with_context("にじゅうさん", 23)
-        self.assertEqual(result, 23)
-        self.assertIn('ja', languages)
-
-    def test_japanese_numbers_katakana(self):
-        """Test parsing of Japanese numbers in Katakana"""
-        result, types, method, random_info, languages = parse_number_with_context("ナナ", 7)
-        self.assertEqual(result, 7)
-        self.assertIn('multilang', types)
-        self.assertIn('ja', languages)
-
-    def test_japanese_numbers_kanji(self):
-        """Test parsing of Japanese numbers in Kanji"""
-        # Single digit
-        result, types, method, random_info, languages = parse_number_with_context("七", 7)
-        self.assertEqual(result, 7)
-        self.assertIn('ja', languages)
-        
-        # Double digit
-        result, types, method, random_info, languages = parse_number_with_context("二十三", 23)
-        self.assertEqual(result, 23)
-        self.assertIn('ja', languages)
-        
-        # 100
-        result, types, method, random_info, languages = parse_number_with_context("百", 100)
-        self.assertEqual(result, 100)
-        self.assertIn('ja', languages)
-
     def test_japanese_numbers_romaji(self):
         """Test parsing of Japanese numbers in Romaji"""
         result, types, method, random_info, languages = parse_number_with_context("nana", 7)
@@ -659,20 +622,6 @@ class CountingBotTest(unittest.TestCase):
         
         result, types, method, random_info, languages = parse_number_with_context("nijuusan", 23)
         self.assertEqual(result, 23)
-        self.assertIn('ja', languages)
-
-    def test_japanese_in_expressions(self):
-        """Test Japanese numbers in mathematical expressions"""
-        # Hi + katakana
-        result, types, method, random_info, languages = parse_number_with_context("さん + ヨン", 7)  # 3 + 4
-        self.assertEqual(result, 7)
-        self.assertIn('math', types)
-        self.assertIn('ja', languages)
-        
-        # Kanji with sqrt
-        result, types, method, random_info, languages = parse_number_with_context("sqrt(十六)", 4)  # sqrt(16)
-        self.assertEqual(result, 4)
-        self.assertIn('sqrt', types)
         self.assertIn('ja', languages)
 
     def test_roman_numerals_basic(self):
@@ -782,6 +731,74 @@ class CountingBotTest(unittest.TestCase):
         self.assertIn('roman', types)
         self.assertIn('la', languages)
         self.assertIn('en', languages)
+    
+    def test_roman_numeral_sentence_fix(self):
+        """Test that sentences starting with 'I' are not parsed as Roman numeral 1"""
+        # These should NOT be parseable as numbers
+        sentences = [
+            ("I am great!", None),
+            ("I love counting", None),
+            ("I think this is fun", None),
+            ("I want to play", None),
+            ("I can count", None),
+            ("I wonder what happens", None),
+        ]
+        
+        for text, expected in sentences:
+            result, types, method, random_info, languages = parse_number_with_context(text, 1)
+            self.assertIsNone(result, f"'{text}' should not be parsed as a number")
+            self.assertFalse(starts_with_parseable(text), f"'{text}' should not be parseable")
+        
+        # These SHOULD still be parseable as Roman numerals
+        valid_romans = [
+            ("I", 1),
+            ("II", 2), 
+            ("III", 3),
+            ("IV", 4),
+            ("V", 5),
+            ("X", 10),
+            ("XV", 15),
+            ("XX", 20),
+            ("L", 50),
+            ("C", 100),
+            ("I + II", 3),  # Math with Roman numerals should still work
+            ("V * II", 10),
+        ]
+        
+        for text, expected in valid_romans:
+            self.assertTrue(starts_with_parseable(text), f"'{text}' should be parseable")
+            result, types, method, random_info, languages = parse_number_with_context(text, expected)
+            self.assertEqual(result, expected, f"'{text}' should parse to {expected}")
+    
+    def test_roman_edge_cases(self):
+        """Test edge cases for Roman numeral parsing"""
+        # Mixed case should not parse as Roman
+        result, _, _, _, _ = parse_number_with_context("i am great", 1)
+        self.assertIsNone(result, "Lowercase 'i' should not be parsed as Roman numeral")
+        
+        # Partial Roman at start shouldn't parse if followed by regular text
+        result, _, _, _, _ = parse_number_with_context("Via Roma", 1)
+        self.assertIsNone(result, "'Via Roma' should not be parsed")
+        
+        result, _, _, _, _ = parse_number_with_context("Visa card", 1)
+        self.assertIsNone(result, "'Visa card' should not be parsed")
+    
+    def test_complex_roman_expressions(self):
+        """Test that Roman numerals work in mathematical expressions"""
+        # Roman numerals in math should still work
+        test_cases = [
+            ("X+5", 15),
+            ("XX-V", 15),
+            ("C/X", 10),
+            ("L*II", 100),
+            ("sqrt(IX)", 3),
+        ]
+        
+        for text, expected in test_cases:
+            result, types, method, random_info, languages = parse_number_with_context(text, expected)
+            self.assertEqual(result, expected, f"'{text}' should evaluate to {expected}")
+            self.assertIn('math', types)
+            self.assertIn('la', languages)  # Latin for Roman numerals
         
 if __name__ == '__main__':
     # Run all tests

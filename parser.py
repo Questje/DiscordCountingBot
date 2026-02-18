@@ -8,7 +8,7 @@ import random
 import concurrent.futures
 from word2number import w2n
 from simpleeval import simple_eval, NumberTooHigh
-from constants import MATH_CONSTANTS, MULTILANG_NUMBERS, ROMAN_NUMERALS
+from constants import MATH_CONSTANTS, MULTILANG_NUMBERS, ROMAN_NUMERALS, AMBIGUOUS_NUMBERS
 
 # Thread pool for safe expression evaluation
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
@@ -77,9 +77,25 @@ def process_factorials(text):
     return re.sub(pattern, replace_factorial, text)
 
 
-def try_parse_multilang_number(text):
-    """Try to parse a number in various languages."""
+def try_parse_multilang_number(text, expected_number=None):
+    """
+    Try to parse a number in various languages.
+    If expected_number is provided, use it to disambiguate words with multiple meanings.
+    """
     clean_text = text.lower().strip()
+    
+    # Check for ambiguous numbers first
+    if clean_text in AMBIGUOUS_NUMBERS:
+        possible_values = AMBIGUOUS_NUMBERS[clean_text]
+        
+        # If we have context (expected_number), try to find a matching interpretation
+        if expected_number is not None:
+            for value, langs in possible_values:
+                if value == expected_number:
+                    return (value, langs)
+        
+        # Without context or no match, return the first one as default
+        return possible_values[0]
     
     if clean_text in MULTILANG_NUMBERS:
         return MULTILANG_NUMBERS[clean_text]
@@ -127,6 +143,108 @@ def try_parse_multilang_number(text):
     
     return None
 
+
+def try_parse_multilang_number_all_interpretations(text):
+    """
+    Try to parse a number in various languages and return ALL possible interpretations.
+    Returns a list of (value, languages) tuples.
+    """
+    clean_text = text.lower().strip()
+    results = []
+    
+    # Check for ambiguous numbers first
+    if clean_text in AMBIGUOUS_NUMBERS:
+        results.extend(AMBIGUOUS_NUMBERS[clean_text])
+    
+    # Also check regular multilang numbers
+    if clean_text in MULTILANG_NUMBERS:
+        value, langs = MULTILANG_NUMBERS[clean_text]
+        # Avoid duplicates
+        if not any(v == value for v, _ in results):
+            results.append((value, langs))
+    
+    # Check normalized form
+    normalized = clean_text.replace(' et ', '-et-').replace(' ', '-')
+    if normalized in MULTILANG_NUMBERS and normalized != clean_text:
+        value, langs = MULTILANG_NUMBERS[normalized]
+        if not any(v == value for v, _ in results):
+            results.append((value, langs))
+    
+    # Two-word combinations
+    words = clean_text.split()
+    if len(words) == 2:
+        tens_word, ones_word = words[0], words[1]
+        if tens_word in MULTILANG_NUMBERS and ones_word in MULTILANG_NUMBERS:
+            tens_val, tens_langs = MULTILANG_NUMBERS[tens_word]
+            ones_val, ones_langs = MULTILANG_NUMBERS[ones_word]
+            combined_langs = tens_langs.union(ones_langs)
+            if tens_val in [20, 30, 40, 50, 60, 70, 80, 90] and 1 <= ones_val <= 9:
+                combined_val = tens_val + ones_val
+                if not any(v == combined_val for v, _ in results):
+                    results.append((combined_val, combined_langs))
+
+    # Spanish style 'tens y ones'
+    if ' y ' in clean_text:
+        parts = [p.strip() for p in clean_text.split(' y ')]
+        if len(parts) == 2:
+            tens_word, ones_word = parts[0], parts[1]
+            if tens_word in MULTILANG_NUMBERS and ones_word in MULTILANG_NUMBERS:
+                tens_val, tens_langs = MULTILANG_NUMBERS[tens_word]
+                ones_val, ones_langs = MULTILANG_NUMBERS[ones_word]
+                combined_langs = tens_langs.union(ones_langs)
+                if tens_val in [20, 30, 40, 50, 60, 70, 80, 90] and 1 <= ones_val <= 9:
+                    combined_val = tens_val + ones_val
+                    if not any(v == combined_val for v, _ in results):
+                        results.append((combined_val, combined_langs))
+    
+    # French special forms
+    if clean_text.startswith('soixante-'):
+        remainder = clean_text[9:]
+        if remainder in MULTILANG_NUMBERS:
+            rem_val, rem_langs = MULTILANG_NUMBERS[remainder]
+            if 10 <= rem_val <= 19:
+                combined_val = 60 + rem_val
+                if not any(v == combined_val for v, _ in results):
+                    results.append((combined_val, {'fr'}.union(rem_langs)))
+    
+    if clean_text.startswith('quatre-vingt-'):
+        remainder = clean_text[13:]
+        if remainder in MULTILANG_NUMBERS:
+            rem_val, rem_langs = MULTILANG_NUMBERS[remainder]
+            if 1 <= rem_val <= 19:
+                combined_val = 80 + rem_val
+                if not any(v == combined_val for v, _ in results):
+                    results.append((combined_val, {'fr'}.union(rem_langs)))
+    
+    return results
+
+
+def is_number_word(text):
+    """Check if a word is a recognized number word in any language."""
+    text_lower = text.lower().strip()
+    
+    # Check ambiguous numbers
+    if text_lower in AMBIGUOUS_NUMBERS:
+        return True
+    
+    # Check multilang numbers
+    if text_lower in MULTILANG_NUMBERS:
+        return True
+    
+    # Check math constants
+    if text_lower in MATH_CONSTANTS:
+        return True
+    
+    # Check English word2number
+    try:
+        w2n.word_to_num(text_lower)
+        return True
+    except ValueError:
+        pass
+    
+    return False
+
+
 def is_compound_number_word(text):
     """Check if a hyphenated word is a compound number word (like twenty-one)."""
     # Common compound patterns that should NOT be treated as math
@@ -148,15 +266,17 @@ def starts_with_parseable(text):
     text_stripped = text.strip()
     text_lower = text_stripped.lower()
     
+    # Check for digits or opening parenthesis or leading operators
     if re.match(r'^\d', text_stripped) or re.match(r'^[(\-+:]', text_stripped) or text_lower.startswith(('sqrt(', 'random(')):
         return True
     
     # Check for Roman numerals - only if the ENTIRE first word/token is Roman numerals
     # This prevents "I am great" from being parsed but allows standalone "I" or "XV"
     # Match Roman numerals followed by space, end of string, or math operator
-    first_word_match = re.match(r'^([IVXLCDM]+)(?:\s|$|[+\-*/:()%^])', text_stripped)
-    if first_word_match:
-        full_roman = first_word_match.group(1)
+    # IMPORTANT: Use text_stripped (NOT text_lower) because Roman numerals must be uppercase
+    first_roman_match = re.match(r'^([IVXLCDM]+)(?:\s|$|[+\-*/:()%^])', text_stripped)
+    if first_roman_match:
+        full_roman = first_roman_match.group(1)
         remaining_text = text_stripped[len(full_roman):]
         
         # Only consider it parseable if:
@@ -167,7 +287,7 @@ def starts_with_parseable(text):
         if not remaining_text:  # Standalone Roman numeral
             if try_parse_roman_numeral(full_roman) is not None:
                 return True
-        elif remaining_text[0:1] in '+\-*/:()%^':  # Immediately followed by operator
+        elif remaining_text[0:1] in r'+-*/:()%^':  # Immediately followed by operator
             if try_parse_roman_numeral(full_roman) is not None:
                 return True
         # If followed by space and then a word, check if it's a math operation
@@ -179,18 +299,39 @@ def starts_with_parseable(text):
                     return True
             # Otherwise it's regular text like "I am", don't parse
     
-    first_token_match = re.match(r'^([a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)*)[+\-*/:()%^]?', text_lower)
-
-    if first_token_match:
-        first_word = first_token_match.group(1)
-        clean_word = re.sub(r'[^\w\-]', '', first_word)
+    # Check if text starts with a word that could be a number
+    # This handles cases like "ni-5", "tres+4", "zeven*3"
+    first_word_match = re.match(r'^([a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)', text_lower)
+    
+    if first_word_match:
+        first_word = first_word_match.group(1)
         
-        # Use lowercase when checking multilingual numbers dictionary keys
-        if clean_word.lower() in MATH_CONSTANTS or clean_word.lower() in MULTILANG_NUMBERS:
+        # Check if this first word is a number word (constant, multilang, ambiguous, or english)
+        if first_word in MATH_CONSTANTS:
+            return True
+        
+        # Check both regular multilang numbers AND ambiguous numbers
+        if first_word in MULTILANG_NUMBERS or first_word in AMBIGUOUS_NUMBERS:
             return True
         
         try:
-            w2n.word_to_num(clean_word)
+            w2n.word_to_num(first_word)
+            return True
+        except ValueError:
+            pass
+    
+    # Also check for compound number words (like "twenty-one")
+    first_token_match = re.match(r'^([a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)+)', text_lower)
+    
+    if first_token_match:
+        compound_word = first_token_match.group(1)
+        
+        # Check if it's a valid compound number word
+        if compound_word in MULTILANG_NUMBERS:
+            return True
+        
+        try:
+            w2n.word_to_num(compound_word)
             return True
         except ValueError:
             pass
@@ -210,15 +351,38 @@ def has_spaced_operators(text):
 
 def has_unspaced_operators(text):
     """Check if text has operators without spaces, excluding compound words."""
-    temp_text = text
+    # Check for operators that are clearly math (not hyphens in compound words)
+    # First, check for any non-hyphen operators
+    if re.search(r'[+*/:()%^]', text):
+        return True
     
-    # Remove compound number words to avoid false positives
-    for pattern in [r'\b(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)-\w+\b',
-                    r'\b\w+-(one|two|three|four|five|six|seven|eight|nine|teen|ty)\b',
-                    r'\bvingt-(et-)?\w+\b', r'\bdix-(sept|huit|neuf)\b']:
-        temp_text = re.sub(pattern, '__COMPOUND__', temp_text, flags=re.IGNORECASE)
+    # For hyphens, we need to be more careful
+    # Check if there's a hyphen that's NOT part of a compound number word
+    if '-' in text:
+        # Split by spaces first
+        parts = text.split()
+        for part in parts:
+            if '-' in part:
+                # Check if this part is a valid compound word
+                if not is_valid_compound_word(part):
+                    # It has a hyphen but isn't a compound word - likely math
+                    # But verify at least one side looks like a number
+                    hyphen_parts = part.split('-')
+                    for i, hp in enumerate(hyphen_parts):
+                        # Check if this part is a number (digit or word)
+                        if hp.isdigit():
+                            return True
+                        if hp.lower() in MULTILANG_NUMBERS or hp.lower() in AMBIGUOUS_NUMBERS:
+                            return True
+                        if hp.lower() in MATH_CONSTANTS:
+                            return True
+                        try:
+                            w2n.word_to_num(hp.lower())
+                            return True
+                        except ValueError:
+                            pass
     
-    return bool(re.search(r'[+\-*/:()%^]', temp_text))
+    return False
 
 
 def process_random_functions(text):
@@ -237,7 +401,53 @@ def process_random_functions(text):
     return re.sub(pattern, replace_random, text, flags=re.IGNORECASE), random_values
 
 
-def preprocess_expression(text):
+def find_ambiguous_words_in_expression(text):
+    """Find all ambiguous words in a mathematical expression."""
+    text_lower = text.lower()
+    found_ambiguous = []
+    
+    for word in AMBIGUOUS_NUMBERS.keys():
+        # Use word boundary matching to find the word
+        pattern = r'\b' + re.escape(word) + r'\b'
+        if re.search(pattern, text_lower):
+            found_ambiguous.append(word)
+    
+    return found_ambiguous
+
+
+def generate_expression_variants(text, ambiguous_words):
+    """
+    Generate all possible variants of an expression by substituting
+    different values for ambiguous words.
+    Returns a list of (expression_text, languages_used) tuples.
+    """
+    if not ambiguous_words:
+        return [(text, set())]
+    
+    variants = []
+    
+    # Get all combinations of ambiguous word values
+    from itertools import product
+    
+    word_options = []
+    for word in ambiguous_words:
+        word_options.append([(word, value, langs) for value, langs in AMBIGUOUS_NUMBERS[word]])
+    
+    for combination in product(*word_options):
+        variant_text = text.lower()
+        combined_languages = set()
+        
+        for word, value, langs in combination:
+            pattern = r'\b' + re.escape(word) + r'\b'
+            variant_text = re.sub(pattern, str(value), variant_text, flags=re.IGNORECASE)
+            combined_languages.update(langs)
+        
+        variants.append((variant_text, combined_languages))
+    
+    return variants
+
+
+def preprocess_expression(text, expected_number=None):
     """Preprocess mathematical expression for evaluation."""
     languages_used = set()
     text = text.replace('^', '**')
@@ -262,11 +472,22 @@ def preprocess_expression(text):
             text = text[:start_pos] + str(roman_value) + text[end_pos:]
             languages_used.add('la')  # Latin
     
+    # Handle ambiguous words with context
+    for word in AMBIGUOUS_NUMBERS.keys():
+        pattern = r'\b' + re.escape(word) + r'\b'
+        if re.search(pattern, text, re.IGNORECASE):
+            # Get the best value based on context (this will be refined later)
+            result = try_parse_multilang_number(word, expected_number)
+            if result:
+                value, langs = result
+                text = re.sub(pattern, str(value), text, flags=re.IGNORECASE)
+                languages_used.update(langs)
+    
     words_with_pos = [(m.group(), m.start(), m.end()) 
                   for m in re.finditer(r'\b[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)*\b', text)]
 
     for word, start_pos, end_pos in reversed(words_with_pos):
-        multilang_result = try_parse_multilang_number(word.lower())
+        multilang_result = try_parse_multilang_number(word.lower(), expected_number)
         if multilang_result is not None:
             num_val, langs = multilang_result
             text = text[:start_pos] + str(num_val) + text[end_pos:]
@@ -283,7 +504,103 @@ def preprocess_expression(text):
     return text, languages_used
 
 
-def extract_first_number_from_text(text):
+def preprocess_expression_all_variants(text):
+    """
+    Preprocess a mathematical expression and return ALL possible variants
+    when ambiguous words are present.
+    Returns a list of (processed_text, languages_used) tuples.
+    """
+    # Find ambiguous words in the expression
+    ambiguous_words = find_ambiguous_words_in_expression(text)
+    
+    # Generate all variants
+    variants = generate_expression_variants(text, ambiguous_words)
+    
+    results = []
+    for variant_text, ambiguous_langs in variants:
+        # Now preprocess each variant (without the ambiguous words, since they're already replaced)
+        languages_used = set(ambiguous_langs)
+        
+        processed = variant_text
+        processed = processed.replace('^', '**')
+        processed = processed.replace(':', '/')
+        
+        def replace_sqrt(match):
+            return f"({match.group(1)})**0.5"
+        
+        processed = re.sub(r'sqrt\s*\(\s*([^)]+)\s*\)', replace_sqrt, processed, flags=re.IGNORECASE)
+        
+        for constant, value in MATH_CONSTANTS.items():
+            processed = re.sub(r'\b' + re.escape(constant) + r'\b', str(value), processed, flags=re.IGNORECASE)
+        
+        # Extract and replace Roman numerals
+        roman_pattern = r'\b([IVXLCDM]+)\b'
+        # Need to check original text for Roman numerals since variant_text is lowercase
+        original_roman_matches = [(m.group(), m.start(), m.end()) 
+                                   for m in re.finditer(roman_pattern, text)]
+        
+        for roman_text, _, _ in original_roman_matches:
+            roman_value = try_parse_roman_numeral(roman_text)
+            if roman_value is not None:
+                processed = re.sub(r'\b' + roman_text.lower() + r'\b', str(roman_value), processed, flags=re.IGNORECASE)
+                languages_used.add('la')
+        
+        # Replace remaining word numbers
+        words_with_pos = [(m.group(), m.start(), m.end()) 
+                      for m in re.finditer(r'\b[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)*\b', processed)]
+
+        for word, start_pos, end_pos in reversed(words_with_pos):
+            multilang_result = try_parse_multilang_number(word.lower())
+            if multilang_result is not None:
+                num_val, langs = multilang_result
+                processed = processed[:start_pos] + str(num_val) + processed[end_pos:]
+                languages_used.update(langs)
+                continue
+            
+            try:
+                number = w2n.word_to_num(word.lower())
+                processed = processed[:start_pos] + str(number) + processed[end_pos:]
+                languages_used.add('en')
+            except ValueError:
+                continue
+        
+        results.append((processed, languages_used))
+    
+    return results
+
+
+def normalize_expression_spacing(text):
+    """
+    Normalize spacing in expressions by adding spaces around operators.
+    This helps with consistent parsing of expressions like "10+vier-tre".
+    NOTE: This does NOT protect compound words - that's handled by generating
+    multiple variants in get_all_possible_interpretations().
+    """
+    result = text
+    
+    # First, protect sqrt() and random() functions
+    result = re.sub(r'sqrt\s*\(', 'SQRT_FUNC(', result, flags=re.IGNORECASE)
+    result = re.sub(r'random\s*\(', 'RANDOM_FUNC(', result, flags=re.IGNORECASE)
+    
+    # Add spaces around operators (except inside function calls)
+    # Handle + and * and / and : and ^ and %
+    for op in ['+', '*', '/', ':', '^', '%']:
+        result = result.replace(op, f' {op} ')
+    
+    # Handle minus/hyphen - add spaces around all hyphens
+    result = re.sub(r'-', ' - ', result)
+    
+    # Restore functions
+    result = result.replace('SQRT_FUNC(', 'sqrt(')
+    result = result.replace('RANDOM_FUNC(', 'random(')
+    
+    # Clean up multiple spaces
+    result = re.sub(r'\s+', ' ', result).strip()
+    
+    return result
+
+
+def extract_first_number_from_text(text, expected_number=None):
     """Extract the first valid number from text."""
     if has_math_operators(text):
         return None, None, set()
@@ -302,15 +619,17 @@ def extract_first_number_from_text(text):
         if roman_value is not None:
             found_numbers.append((roman_value, match.start(), 'roman', {'la'}))
     
-    # Find multilang numbers
+    # Find multilang numbers - now with all interpretations
     words = text.lower().split()
     for i, word in enumerate(words):
         clean_word = re.sub(r'[^\w\-]', '', word)
-        multilang_result = try_parse_multilang_number(clean_word)
-        if multilang_result is not None:
-            multilang_num, langs = multilang_result
+        
+        # Get all possible interpretations
+        all_interpretations = try_parse_multilang_number_all_interpretations(clean_word)
+        if all_interpretations:
             word_pos = text.lower().find(word.lower(), current_pos)
-            found_numbers.append((multilang_num, word_pos, 'multilang', langs))
+            for multilang_num, langs in all_interpretations:
+                found_numbers.append((multilang_num, word_pos, 'multilang', langs))
             current_pos = word_pos + len(word)
     
     # Try English word2number only if no multilang found
@@ -333,6 +652,14 @@ def extract_first_number_from_text(text):
     valid_numbers = [(num, pos, typ, langs) for num, pos, typ, langs in found_numbers if num > 0]
     
     if valid_numbers:
+        # If we have an expected number, prioritize matches
+        if expected_number is not None:
+            matching = [n for n in valid_numbers if n[0] == expected_number]
+            if matching:
+                matching.sort(key=lambda x: x[1])
+                first_num, first_pos, first_type, first_langs = matching[0]
+                return first_num, first_pos, first_langs
+        
         valid_numbers.sort(key=lambda x: x[1])
         first_num, first_pos, first_type, first_langs = valid_numbers[0]
         return first_num, first_pos, first_langs
@@ -373,7 +700,8 @@ def analyze_input_types(original_text):
     words = re.findall(r'\b[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)*\b', original_text)
 
     for word in words:
-        if try_parse_multilang_number(word.lower()) is not None:
+        # Check ambiguous numbers too
+        if word.lower() in AMBIGUOUS_NUMBERS or try_parse_multilang_number(word.lower()) is not None:
             types.add('multilang')
             continue
         try:
@@ -395,34 +723,41 @@ def analyze_input_types(original_text):
 def can_be_hyphenated_math(text):
     """Check if hyphenated text could potentially be interpreted as math."""
     parts = text.split('-')
-    if len(parts) == 2:
-        first_part = parts[0].strip()
-        second_part = parts[1].strip()
-        
-        # Check if both parts are number words
-        first_is_number = False
-        second_is_number = False
-        
-        # Check multilang
-        if try_parse_multilang_number(first_part) is not None:
-            first_is_number = True
-        else:
-            try:
-                w2n.word_to_num(first_part)
+    if len(parts) >= 2:
+        # Check if at least two adjacent parts are number words or digits
+        for i in range(len(parts) - 1):
+            first_part = parts[i].strip()
+            second_part = parts[i + 1].strip()
+            
+            first_is_number = False
+            second_is_number = False
+            
+            # Check first part
+            if first_part.isdigit():
                 first_is_number = True
-            except:
-                pass
-        
-        if try_parse_multilang_number(second_part) is not None:
-            second_is_number = True
-        else:
-            try:
-                w2n.word_to_num(second_part)
+            elif first_part.lower() in AMBIGUOUS_NUMBERS or try_parse_multilang_number(first_part) is not None:
+                first_is_number = True
+            else:
+                try:
+                    w2n.word_to_num(first_part)
+                    first_is_number = True
+                except:
+                    pass
+            
+            # Check second part
+            if second_part.isdigit():
                 second_is_number = True
-            except:
-                pass
-        
-        return first_is_number and second_is_number
+            elif second_part.lower() in AMBIGUOUS_NUMBERS or try_parse_multilang_number(second_part) is not None:
+                second_is_number = True
+            else:
+                try:
+                    w2n.word_to_num(second_part)
+                    second_is_number = True
+                except:
+                    pass
+            
+            if first_is_number and second_is_number:
+                return True
     
     return False
 
@@ -469,7 +804,7 @@ def is_valid_compound_word(text):
     return False
 
 
-def get_all_possible_interpretations(text):
+def get_all_possible_interpretations(text, expected_number=None):
     """Get all possible interpretations of the input text."""
     interpretations = []
     processed_text, random_values = process_random_functions(text)
@@ -483,25 +818,45 @@ def get_all_possible_interpretations(text):
             interpretations.append((roman_value, 'roman', f'Roman: {text} → {roman_value}', 
                                   random_values, {'la'}))
     
-    # [Rest of the existing code remains the same...]
+    # Check for ambiguous multilang numbers - add all interpretations
+    clean_text = processed_text.strip().lower()
+    all_multilang_interpretations = try_parse_multilang_number_all_interpretations(clean_text)
+    for multilang_num, langs in all_multilang_interpretations:
+        if multilang_num > 0:
+            interpretations.append((multilang_num, 'multilang', 
+                                  f'Multilang: {text} → {multilang_num}', 
+                                  random_values, langs))
+    
+    # Find compound words in the expression
+    compound_words_in_expr = find_compound_words_in_expression(processed_text)
+    
+    # Generate expression variants: with compounds preserved AND with compounds as math
+    expression_variants = generate_compound_variants(processed_text, compound_words_in_expr)
+    
     # Check if it could be interpreted as hyphenated math
     if '-' in processed_text and can_be_hyphenated_math(processed_text):
-        try:
-            math_version = processed_text.replace('-', ' - ')
-            expr_processed, expr_languages = preprocess_expression(math_version)
-            all_languages_math = set(expr_languages)
+        for variant_text, variant_is_compound in expression_variants:
+            # Normalize spacing
+            normalized = normalize_expression_spacing(variant_text)
             
-            future = executor.submit(evaluate_expression_safe, process_factorials(expr_processed))
-            result = future.result(timeout=0.5)
+            # Generate all variants for ambiguous words
+            all_variants = preprocess_expression_all_variants(normalized)
             
-            if result is not None and isinstance(result, (int, float)):
-                rounded = round(result)
-                if rounded > 0:
-                    interpretations.append((rounded, 'hyphenated_math', 
-                                          f'Hyphenated math: {text} → {rounded}', 
-                                          random_values, all_languages_math))
-        except:
-            pass
+            for expr_processed, expr_languages in all_variants:
+                try:
+                    future = executor.submit(evaluate_expression_safe, process_factorials(expr_processed))
+                    result = future.result(timeout=0.5)
+                    
+                    if result is not None and isinstance(result, (int, float)):
+                        rounded = round(result)
+                        if rounded > 0:
+                            # Avoid duplicates
+                            if not any(i[0] == rounded and i[1] == 'hyphenated_math' for i in interpretations):
+                                interpretations.append((rounded, 'hyphenated_math', 
+                                                      f'Hyphenated math: {text} → {rounded}', 
+                                                      random_values, expr_languages))
+                except:
+                    pass
     
     # Check standard math expressions
     is_math_expression = (has_spaced_operators(processed_text) or 
@@ -511,26 +866,34 @@ def get_all_possible_interpretations(text):
                          any(const in processed_text.lower() for const in MATH_CONSTANTS))
     
     if is_math_expression:
-        try:
-            expr_processed, expr_languages = preprocess_expression(processed_text)
-            all_languages.update(expr_languages)
-            expr_with_factorials = process_factorials(expr_processed)
+        for variant_text, variant_is_compound in expression_variants:
+            # Normalize spacing
+            normalized = normalize_expression_spacing(variant_text)
             
-            future = executor.submit(evaluate_expression_safe, expr_with_factorials)
-            result = future.result(timeout=0.5)
+            # Generate all variants for ambiguous words
+            all_variants = preprocess_expression_all_variants(normalized)
             
-            if result is not None and isinstance(result, (int, float)):
-                rounded = round(result)
-                if rounded > 0:
-                    math_type = 'factorial_math' if '!' in text else 'math_expression'
-                    interpretations.append((rounded, math_type, f'Math: {text} → {rounded}', 
-                                          random_values, all_languages))
-        except (concurrent.futures.TimeoutError, NumberTooHigh):
-            interpretations.append((None, 'evaluation_timeout', 
-                                  'Calculation was too complex or took too long.', None, set()))
-            return interpretations
-        except Exception:
-            pass
+            for expr_processed, expr_languages in all_variants:
+                try:
+                    expr_with_factorials = process_factorials(expr_processed)
+                    
+                    future = executor.submit(evaluate_expression_safe, expr_with_factorials)
+                    result = future.result(timeout=0.5)
+                    
+                    if result is not None and isinstance(result, (int, float)):
+                        rounded = round(result)
+                        if rounded > 0:
+                            math_type = 'factorial_math' if '!' in text else 'math_expression'
+                            # Avoid duplicates
+                            if not any(i[0] == rounded and i[1] == math_type for i in interpretations):
+                                interpretations.append((rounded, math_type, f'Math: {text} → {rounded}', 
+                                                      random_values, expr_languages))
+                except (concurrent.futures.TimeoutError, NumberTooHigh):
+                    interpretations.append((None, 'evaluation_timeout', 
+                                          'Calculation was too complex or took too long.', None, set()))
+                    return interpretations
+                except Exception:
+                    pass
     
     # Try as compound word or written number
     if '-' not in processed_text or is_valid_compound_word(processed_text):
@@ -551,32 +914,95 @@ def get_all_possible_interpretations(text):
         except:
             pass
     
-    # Try extraction if not a math expression
+    # Try extraction if not a math expression (with expected_number for context)
     if not is_math_expression or not interpretations:
-        extracted_info, _, extract_languages = extract_first_number_from_text(text)
+        extracted_info, _, extract_languages = extract_first_number_from_text(text, expected_number)
         if extracted_info and extracted_info > 0:
-            interpretations.append((extracted_info, 'extracted', 
-                                  f'Extracted: {text} → {extracted_info}', None, extract_languages))
+            # Avoid duplicate if already added via multilang
+            if not any(i[0] == extracted_info and i[1] in ('multilang', 'extracted') for i in interpretations):
+                interpretations.append((extracted_info, 'extracted', 
+                                      f'Extracted: {text} → {extracted_info}', None, extract_languages))
         
-        clean_text = processed_text.strip().lower()
         if clean_text in MATH_CONSTANTS:
             const_value = MATH_CONSTANTS[clean_text]
             rounded = round(const_value)
             if rounded > 0:
                 interpretations.append((rounded, 'constant', f'Constant: {text} → {rounded}', 
                                       random_values, set()))
-        
-        if not has_spaced_operators(processed_text):
-            multilang_result = try_parse_multilang_number(processed_text)
-            if multilang_result is not None:
-                multilang_num, langs = multilang_result
-                if multilang_num > 0:
-                    interpretations.append((multilang_num, 'multilang', 
-                                          f'Multilang: {text} → {multilang_num}', 
-                                          random_values, langs))
     
     return interpretations
+
+
+def find_compound_words_in_expression(text):
+    """Find all potential compound number words in an expression."""
+    compound_words = []
     
+    # Pattern to find word-word or word-word-word patterns
+    pattern = r'\b([a-zA-ZÀ-ÿ]+(?:-[a-zA-ZÀ-ÿ]+)+)\b'
+    
+    for match in re.finditer(pattern, text, re.IGNORECASE):
+        word = match.group(1)
+        if is_valid_compound_word(word):
+            compound_words.append(word)
+    
+    return compound_words
+
+
+def generate_compound_variants(text, compound_words):
+    """
+    Generate variants of an expression where compound words can be either:
+    1. Kept as compound words (e.g., "vingt-deux" = 22)
+    2. Treated as math (e.g., "vingt-deux" = "vingt - deux" = 20 - 2 = 18)
+    
+    Returns a list of (variant_text, has_compounds) tuples.
+    """
+    if not compound_words:
+        return [(text, False)]
+    
+    from itertools import product
+    
+    variants = []
+    
+    # For each compound word, we have two options: keep it or split it
+    options_per_word = []
+    for word in compound_words:
+        # Option 1: Keep as compound (replace with its numeric value as placeholder)
+        multilang_result = try_parse_multilang_number(word)
+        if multilang_result:
+            compound_value = multilang_result[0]
+            options_per_word.append([
+                (word, str(compound_value), True),   # Keep as compound
+                (word, word, False)                   # Treat as math (will be split by normalize_expression_spacing)
+            ])
+        else:
+            # Try English
+            try:
+                compound_value = w2n.word_to_num(word)
+                options_per_word.append([
+                    (word, str(compound_value), True),
+                    (word, word, False)
+                ])
+            except ValueError:
+                # Can't parse as compound, only math option
+                options_per_word.append([(word, word, False)])
+    
+    # Generate all combinations
+    for combination in product(*options_per_word):
+        variant_text = text
+        has_compound = False
+        
+        for original_word, replacement, is_compound in combination:
+            if is_compound:
+                has_compound = True
+            # Replace the word with its replacement
+            pattern = r'\b' + re.escape(original_word) + r'\b'
+            variant_text = re.sub(pattern, replacement, variant_text, flags=re.IGNORECASE)
+        
+        # Avoid duplicate variants
+        if not any(v[0] == variant_text for v in variants):
+            variants.append((variant_text, has_compound))
+    
+    return variants
 
 def parse_number_with_context(text, expected_number):
     """Parse a number from text with context awareness."""
@@ -597,7 +1023,7 @@ def parse_number_with_context(text, expected_number):
         except ValueError:
             pass
     
-    interpretations = get_all_possible_interpretations(text)
+    interpretations = get_all_possible_interpretations(text, expected_number)
     
     if not interpretations:
         return None, set(), 'no_valid_interpretation', None, set()
@@ -610,9 +1036,9 @@ def parse_number_with_context(text, expected_number):
     
     if context_matches:
         # When we have a context match, prioritize by type
-        # 'written' should be preferred over 'hyphenated_math' for compound words when both match
-        priority_order = ['written', 'hyphenated_math', 'math_expression', 'factorial_math', 
-                         'extracted', 'constant', 'multilang']
+        # 'multilang' and 'math_expression' should be high priority for context matches
+        priority_order = ['multilang', 'math_expression', 'hyphenated_math', 'written', 'factorial_math', 
+                         'extracted', 'constant', 'roman']
         
         for preferred_type in priority_order:
             for value, interp_type, desc, random_info, languages in context_matches:

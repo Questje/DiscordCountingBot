@@ -69,10 +69,19 @@ ROMAN_NUMERALS = {
     'XCI': 91, 'XCII': 92, 'XCIII': 93, 'XCIV': 94, 'XCV': 95, 'XCVI': 96, 'XCVII': 97, 'XCVIII': 98, 'XCIX': 99, 'C': 100,
 }
 
-# Multilingual number mappings - now returns tuple of (value, set of languages)
+# Ambiguous multilingual numbers - words that mean different numbers in different languages
+# Format: word -> list of (value, language_set) tuples
+# These words are ONLY defined here and NOT in MULTILANG_NUMBERS to prevent overwrites
+AMBIGUOUS_NUMBERS = {
+    'tres': [(3, {'es'}), (60, {'dk'})],           # Spanish 3, Danish 60
+    'ni': [(2, {'ja'}), (9, {'dk', 'no'})],        # Japanese 2, Danish/Norwegian 9
+}
+
+# Multilingual number mappings - returns tuple of (value, set of languages)
+# NOTE: Ambiguous words (with different values in different languages) are in AMBIGUOUS_NUMBERS above
 MULTILANG_NUMBERS = {
     # Dutch
-    'nul': (0, {'nl'}), 'een': (1, {'nl'}), 'twee': (2, {'nl'}), 'drie': (3, {'nl'}), 'vier': (4, {'nl', 'de'}), 'vijf': (5, {'nl'}),
+    'nul': (0, {'nl', 'dk'}), 'een': (1, {'nl'}), 'twee': (2, {'nl'}), 'drie': (3, {'nl'}), 'vier': (4, {'nl', 'de'}), 'vijf': (5, {'nl'}),
     'zes': (6, {'nl'}), 'zeven': (7, {'nl'}), 'acht': (8, {'nl', 'de'}), 'negen': (9, {'nl'}), 'tien': (10, {'nl'}),
     'elf': (11, {'nl', 'de'}), 'twaalf': (12, {'nl', 'de'}), 'dertien': (13, {'nl'}), 'veertien': (14, {'nl'}), 'vijftien': (15, {'nl'}),
     'zestien': (16, {'nl'}), 'zeventien': (17, {'nl'}), 'achttien': (18, {'nl'}), 'negentien': (19, {'nl'}), 'twintig': (20, {'nl'}),
@@ -82,7 +91,7 @@ MULTILANG_NUMBERS = {
     'zestig': (60, {'nl', 'de'}), 'zeventig': (70, {'nl', 'de'}), 'tachtig': (80, {'nl', 'de'}), 'negentig': (90, {'nl', 'de'}), 'honderd': (100, {'nl'}),
     
     # French
-    'zéro': (0, {'fr'}), 'zero': (0, {'fr'}), 'un': (1, {'fr', 'cy'}), 'une': (1, {'fr'}), 'deux': (2, {'fr'}), 'trois': (3, {'fr'}), 
+    'zéro': (0, {'fr'}), 'un': (1, {'fr', 'cy', 'es'}), 'une': (1, {'fr'}), 'deux': (2, {'fr'}), 'trois': (3, {'fr'}), 
     'quatre': (4, {'fr'}), 'cinq': (5, {'fr'}), 'six': (6, {'fr'}), 'sept': (7, {'fr'}), 'huit': (8, {'fr'}), 'neuf': (9, {'fr'}), 
     'dix': (10, {'fr'}), 'onze': (11, {'fr'}), 'douze': (12, {'fr'}), 'treize': (13, {'fr'}), 'quatorze': (14, {'fr'}), 
     'quinze': (15, {'fr'}), 'seize': (16, {'fr'}), 'dix-sept': (17, {'fr'}), 'dix-huit': (18, {'fr'}), 'dix-neuf': (19, {'fr'}), 
@@ -93,9 +102,11 @@ MULTILANG_NUMBERS = {
     'quatre-vingt-dix': (90, {'fr'}), 'quatre-vingts': (80, {'fr'}), 'cent': (100, {'fr', 'cy'}),
 
     # Spanish (0 - 100)
+    # Note: 'tres' is in AMBIGUOUS_NUMBERS (Spanish 3 vs Danish 60)
+    # Note: 'un' is merged with French above (both mean 1)
     'cero': (0, {'es'}),
-    'uno': (1, {'es'}), 'un': (1, {'es'}),
-    'dos': (2, {'es'}), 'tres': (3, {'es'}), 'cuatro': (4, {'es'}), 'cinco': (5, {'es'}),
+    'uno': (1, {'es'}),
+    'dos': (2, {'es'}), 'cuatro': (4, {'es'}), 'cinco': (5, {'es'}),
     'seis': (6, {'es'}), 'siete': (7, {'es'}), 'ocho': (8, {'es'}), 'nueve': (9, {'es'}),
     'diez': (10, {'es'}), 'once': (11, {'es'}), 'doce': (12, {'es'}), 'trece': (13, {'es'}),
     'catorce': (14, {'es'}), 'quince': (15, {'es'}), 'dieciseis': (16, {'es'}), 'dieciséis': (16, {'es'}),
@@ -169,17 +180,18 @@ MULTILANG_NUMBERS = {
     'elli': (50, {'tr'}), 'altmış': (60, {'tr'}), 'altmis': (60, {'tr'}), 'yetmiş': (70, {'tr'}), 'yetmis': (70, {'tr'}),
     'seksen': (80, {'tr'}), 'doksan': (90, {'tr'}), 'yüz': (100, {'tr'}), 'yuz': (100, {'tr'}),
     
-    # Danish (shared words already defined above, only Danish-specific words here)
-    # NOTE: some words overlap with other languages (e.g. 'nul' and 'tres').
-    # Merge language tags so overlapping words include all relevant language codes.
-    'nul': (0, {'dk', 'nl'}), 'en': (1, {'dk', 'no'}), 'et': (1, {'dk'}), 'to': (2, {'dk', 'no'}), 'fire': (4, {'dk', 'no'}),
-    'seks': (6, {'dk', 'no'}), 'syv': (7, {'dk', 'no'}), 'otte': (8, {'dk'}), 'ni': (9, {'dk', 'no'}), 'ti': (10, {'dk', 'no'}),
+    # Danish
+    # Note: 'tres' is in AMBIGUOUS_NUMBERS (Danish 60 vs Spanish 3)
+    # Note: 'ni' is in AMBIGUOUS_NUMBERS (Danish/Norwegian 9 vs Japanese 2)
+    # Note: 'nul' is merged with Dutch above (both mean 0)
+    'en': (1, {'dk', 'no'}), 'et': (1, {'dk'}), 'to': (2, {'dk', 'no'}), 'fire': (4, {'dk', 'no'}),
+    'seks': (6, {'dk', 'no'}), 'syv': (7, {'dk', 'no'}), 'otte': (8, {'dk'}), 'ti': (10, {'dk', 'no'}),
     'elleve': (11, {'dk', 'no'}), 'tretten': (13, {'dk', 'no'}), 'fjorten': (14, {'dk', 'no'}), 'femten': (15, {'dk'}),
     'seksten': (16, {'dk', 'no'}), 'sytten': (17, {'dk', 'no'}), 'søtten': (17, {'no'}), 'atten': (18, {'dk', 'no'}), 'nitten': (19, {'dk', 'no'}), 'tyve': (20, {'dk', 'no'}),
     'enogtyve': (21, {'dk'}), 'toog': (22, {'dk'}), 'treogtyve': (23, {'dk'}), 'fireogtyve': (24, {'dk'}),
     'femogtyve': (25, {'dk'}), 'seksogtyve': (26, {'dk'}), 'syvogtyve': (27, {'dk'}), 'otteogtyve': (28, {'dk'}),
     'niogtyve': (29, {'dk'}), 'tredive': (30, {'dk'}), 'fyrre': (40, {'dk'}), 'fyrretyve': (40, {'dk'}),
-    'halvtreds': (50, {'dk'}), 'tres': (60, {'dk', 'es'}), 'halvfjerds': (70, {'dk'}), 'firs': (80, {'dk'}),
+    'halvtreds': (50, {'dk'}), 'halvfjerds': (70, {'dk'}), 'firs': (80, {'dk'}),
     'halvfems': (90, {'dk'}), 'hundrede': (100, {'dk'}),
     
     # Welsh
@@ -195,15 +207,17 @@ MULTILANG_NUMBERS = {
     'deg a thrigain': (70, {'cy'}), 'pedwar ugain': (80, {'cy'}), 'deg a phedwar ugain': (90, {'cy'}),
     'cant': (100, {'cy'}),
     
-    # Norwegian (only Norwegian-specific words, shared words already defined above)
+    # Norwegian
+    # Note: 'ni' is in AMBIGUOUS_NUMBERS (Danish/Norwegian 9 vs Japanese 2)
     'tjueen': (21, {'no'}), 'tjueto': (22, {'no'}), 'tjuetre': (23, {'no'}), 'tjuefire': (24, {'no'}), 'tjuefem': (25, {'no'}),
     'tjueseks': (26, {'no'}), 'tjuesyv': (27, {'no'}), 'tjueåtte': (28, {'no'}), 'tjueatte': (28, {'no'}),
     'tjueni': (29, {'no'}), 'tredve': (30, {'no'}), 'førti': (40, {'no'}), 'forti': (40, {'no'}),
     'seksti': (60, {'no'}), 'søtti': (70, {'no'}), 'sytti': (70, {'no'}),
     'åtti': (80, {'no'}), 'atti': (80, {'no'}), 'nitti': (90, {'no'}), 'hundre': (100, {'no'}), 'tjue': (20, {'no'}),    
 
-    # Japanese - Romaji (for convenience)
-    'zero': (0, {'ja', 'fr'}), 'rei': (0, {'ja'}), 'ichi': (1, {'ja'}), 'ni': (2, {'ja', 'dk', 'no'}), 'san': (3, {'ja'}),
+    # Japanese - Romaji
+    # Note: 'ni' is in AMBIGUOUS_NUMBERS (Japanese 2 vs Danish/Norwegian 9)
+    'zero': (0, {'ja', 'fr'}), 'rei': (0, {'ja'}), 'ichi': (1, {'ja'}), 'san': (3, {'ja'}),
     'yon': (4, {'ja'}), 'shi': (4, {'ja'}), 'go': (5, {'ja'}), 'roku': (6, {'ja'}), 'nana': (7, {'ja'}),
     'shichi': (7, {'ja'}), 'hachi': (8, {'ja'}), 'kyuu': (9, {'ja'}), 'kyu': (9, {'ja'}), 'ku': (9, {'ja'}),
     'juu': (10, {'ja'}), 'ju': (10, {'ja'}), 'juuichi': (11, {'ja'}), 'juichi': (11, {'ja'}), 'juuni': (12, {'ja'}), 

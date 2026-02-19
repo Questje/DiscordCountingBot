@@ -272,7 +272,6 @@ class CountingBotTest(unittest.TestCase):
         self.assertEqual(result, 24)
         self.assertIn('constants', types)  # pi
         self.assertIn('sqrt', types)       # sqrt(81)
-        self.assertIn('text', types)       # two, eleven
         self.assertIn('math', types)       # mathematical expression
         self.assertIn('en', languages)     # English words
         
@@ -368,7 +367,6 @@ class CountingBotTest(unittest.TestCase):
         result, types, method, random_info, languages = parse_number_with_context("drei! * seven - five", 37)  # 6 * 7 - 5 = 42 - 5 = 37
         self.assertEqual(result, 37)
         self.assertIn('factorial', types)
-        self.assertIn('text', types)
 
     def test_additional_complex_combinations_4(self):
         """Additional test 4: French with random function"""
@@ -404,7 +402,6 @@ class CountingBotTest(unittest.TestCase):
         """Additional test 9: English words with German sqrt"""
         result, types, method, random_info, languages = parse_number_with_context("twenty + sqrt(sechzehn) - eleven", 13)  # 20 + sqrt(16) - 11 = 20 + 4 - 11 = 13
         self.assertEqual(result, 13)
-        self.assertIn('text', types)
         self.assertIn('sqrt', types)
 
     def test_additional_complex_combinations_10(self):
@@ -424,7 +421,6 @@ class CountingBotTest(unittest.TestCase):
         result, types, method, random_info, languages = parse_number_with_context("twenty-one", 21)
         self.assertEqual(result, 21)
         self.assertTrue(method.startswith('context_match'))
-        self.assertIn('text', types)  # Should be recognized as text/written number
         
         # When expecting 19, "twenty-one" should be interpreted as 20-1=19
         result, types, method, random_info, languages = parse_number_with_context("twenty-one", 19)
@@ -989,6 +985,463 @@ class CountingBotTest(unittest.TestCase):
         self.assertTrue(starts_with_parseable("5+trois"))
         self.assertTrue(starts_with_parseable("10-zeven"))
         self.assertTrue(starts_with_parseable("3*cinq"))
+
+
+class AchievementAndFlagTests(unittest.TestCase):
+    """Tests for achievement types and language flags returned by parsing functions"""
+    
+    def assertLanguagesInclude(self, languages, expected_langs, msg=None):
+        """Helper to check that all expected languages are in the result."""
+        for lang in expected_langs:
+            self.assertIn(lang, languages, msg or f"Expected language '{lang}' not found in {languages}")
+    
+    def assertLanguagesExclude(self, languages, excluded_langs, msg=None):
+        """Helper to check that certain languages are NOT in the result."""
+        for lang in excluded_langs:
+            self.assertNotIn(lang, languages, msg or f"Language '{lang}' should not be in {languages}")
+    
+    def assertTypesInclude(self, types, expected_types, msg=None):
+        """Helper to check that all expected types are in the result."""
+        for t in expected_types:
+            self.assertIn(t, types, msg or f"Expected type '{t}' not found in {types}")
+    
+    def assertTypesExclude(self, types, excluded_types, msg=None):
+        """Helper to check that certain types are NOT in the result."""
+        for t in excluded_types:
+            self.assertNotIn(t, types, msg or f"Type '{t}' should not be in {types}")
+
+    def test_english_word_gets_english_flag(self):
+        """Test that English number words get the English flag"""
+        result, types, method, random_info, languages = parse_number_with_context("seven", 7)
+        self.assertEqual(result, 7)
+        self.assertLanguagesInclude(languages, ['en'])
+        
+        result, types, method, random_info, languages = parse_number_with_context("twenty", 20)
+        self.assertEqual(result, 20)
+        self.assertLanguagesInclude(languages, ['en'])
+
+    def test_shared_word_six_gets_both_flags(self):
+        """Test that 'six' (valid in both English and French with same value) gets both flags"""
+        result, types, method, random_info, languages = parse_number_with_context("six", 6)
+        self.assertEqual(result, 6)
+        self.assertLanguagesInclude(languages, ['en', 'fr'], 
+            "'six' should have both English and French flags")
+
+    def test_shared_word_nine_gets_english_flag(self):
+        """Test that 'nine' gets English flag"""
+        result, types, method, random_info, languages = parse_number_with_context("nine", 9)
+        self.assertEqual(result, 9)
+        self.assertLanguagesInclude(languages, ['en'])
+
+    def test_ambiguous_ni_japanese_context(self):
+        """Test that 'ni' gets Japanese flag when context expects 2"""
+        result, types, method, random_info, languages = parse_number_with_context("ni + 3", 5)
+        self.assertEqual(result, 5)
+        self.assertLanguagesInclude(languages, ['ja'], 
+            "'ni' as 2 should have Japanese flag")
+        self.assertLanguagesExclude(languages, ['dk', 'no'],
+            "'ni' as 2 should NOT have Danish/Norwegian flags")
+
+    def test_ambiguous_ni_danish_norwegian_context(self):
+        """Test that 'ni' gets Danish/Norwegian flags when context expects 9"""
+        result, types, method, random_info, languages = parse_number_with_context("ni + 1", 10)
+        self.assertEqual(result, 10)
+        # Should have Danish and/or Norwegian, but not Japanese
+        self.assertTrue('dk' in languages or 'no' in languages,
+            "'ni' as 9 should have Danish and/or Norwegian flag")
+        self.assertLanguagesExclude(languages, ['ja'],
+            "'ni' as 9 should NOT have Japanese flag")
+
+    def test_ambiguous_tres_spanish_context(self):
+        """Test that 'tres' gets Spanish flag when context expects 3"""
+        result, types, method, random_info, languages = parse_number_with_context("tres", 3)
+        self.assertEqual(result, 3)
+        self.assertLanguagesInclude(languages, ['es'],
+            "'tres' as 3 should have Spanish flag")
+        self.assertLanguagesExclude(languages, ['dk'],
+            "'tres' as 3 should NOT have Danish flag")
+
+    def test_ambiguous_tres_danish_context(self):
+        """Test that 'tres' gets Danish flag when context expects 60"""
+        result, types, method, random_info, languages = parse_number_with_context("tres", 60)
+        self.assertEqual(result, 60)
+        self.assertLanguagesInclude(languages, ['dk'],
+            "'tres' as 60 should have Danish flag")
+        self.assertLanguagesExclude(languages, ['es'],
+            "'tres' as 60 should NOT have Spanish flag")
+
+    def test_multi_language_expression_gets_all_flags(self):
+        """Test that expressions with multiple languages get all appropriate flags"""
+        # zeven (Dutch 7) + trois (French 3) = 10
+        result, types, method, random_info, languages = parse_number_with_context("zeven + trois", 10)
+        self.assertEqual(result, 10)
+        self.assertLanguagesInclude(languages, ['nl', 'fr'],
+            "Expression with Dutch and French words should have both flags")
+
+    def test_roman_numeral_gets_latin_flag(self):
+        """Test that Roman numerals get the Latin flag"""
+        result, types, method, random_info, languages = parse_number_with_context("XVII", 17)
+        self.assertEqual(result, 17)
+        self.assertLanguagesInclude(languages, ['la'],
+            "Roman numerals should have Latin flag")
+        self.assertTypesInclude(types, ['roman'])
+
+    def test_roman_with_other_language_gets_both_flags(self):
+        """Test Roman numerals combined with other languages get all flags"""
+        # X (Roman 10) + cinq (French 5) = 15
+        result, types, method, random_info, languages = parse_number_with_context("X + cinq", 15)
+        self.assertEqual(result, 15)
+        self.assertLanguagesInclude(languages, ['la', 'fr'],
+            "Roman + French should have both Latin and French flags")
+
+    def test_math_achievement_for_expression(self):
+        """Test that mathematical expressions get the math type"""
+        result, types, method, random_info, languages = parse_number_with_context("5 + 3", 8)
+        self.assertEqual(result, 8)
+        self.assertTypesInclude(types, ['math'])
+
+    def test_factorial_achievement(self):
+        """Test that factorial expressions get the factorial type"""
+        result, types, method, random_info, languages = parse_number_with_context("4!", 24)
+        self.assertEqual(result, 24)
+        self.assertTypesInclude(types, ['factorial'])
+
+    def test_sqrt_achievement(self):
+        """Test that sqrt expressions get the sqrt type"""
+        result, types, method, random_info, languages = parse_number_with_context("sqrt(49)", 7)
+        self.assertEqual(result, 7)
+        self.assertTypesInclude(types, ['sqrt'])
+
+    def test_constants_achievement(self):
+        """Test that mathematical constants get the constants type"""
+        result, types, method, random_info, languages = parse_number_with_context("pi + 1", 4)
+        self.assertEqual(result, 4)
+        self.assertTypesInclude(types, ['constants'])
+
+
+class PowerLogFibonacciTests(unittest.TestCase):
+    """Tests for power, logarithm, and Fibonacci operations"""
+    
+    # === POWER TESTS ===
+    
+    def test_power_simple_integers(self):
+        """Test simple power/exponent operations with integers"""
+        # 2^3 = 8
+        result, types, method, random_info, languages = parse_number_with_context("2^3", 8)
+        self.assertEqual(result, 8)
+        self.assertIn('power', types)
+        self.assertIn('math', types)
+        
+        # 3^2 = 9
+        result, types, method, random_info, languages = parse_number_with_context("3^2", 9)
+        self.assertEqual(result, 9)
+        self.assertIn('power', types)
+
+    def test_power_with_multilang_words(self):
+        """Test power operations with multilingual number words"""
+        # deux^trois = 2^3 = 8 (French)
+        result, types, method, random_info, languages = parse_number_with_context("deux^trois", 8)
+        self.assertEqual(result, 8)
+        self.assertIn('power', types)
+        self.assertIn('fr', languages)
+        
+        # vier^zwei = 4^2 = 16 (German)
+        result, types, method, random_info, languages = parse_number_with_context("vier^zwei", 16)
+        self.assertEqual(result, 16)
+        self.assertIn('power', types)
+        self.assertIn('de', languages)
+
+    def test_power_in_complex_expression(self):
+        """Test power operations combined with other operations"""
+        # 2^3 + 2 = 8 + 2 = 10
+        result, types, method, random_info, languages = parse_number_with_context("2^3 + 2", 10)
+        self.assertEqual(result, 10)
+        self.assertIn('power', types)
+        self.assertIn('math', types)
+        
+        # sqrt(2^4) = sqrt(16) = 4
+        result, types, method, random_info, languages = parse_number_with_context("sqrt(2^4)", 4)
+        self.assertEqual(result, 4)
+        self.assertIn('power', types)
+        self.assertIn('sqrt', types)
+
+    # === LOGARITHM TESTS ===
+    
+    def test_log_basic_functions(self):
+        """Test basic logarithm functions"""
+        # log10(1000) = 3
+        result, types, method, random_info, languages = parse_number_with_context("log10(1000)", 3)
+        self.assertEqual(result, 3)
+        self.assertIn('log', types)
+        self.assertIn('math', types)
+        
+        # log2(64) = 6
+        result, types, method, random_info, languages = parse_number_with_context("log2(64)", 6)
+        self.assertEqual(result, 6)
+        self.assertIn('log', types)
+        
+        # log(100) = 2 (default base 10)
+        result, types, method, random_info, languages = parse_number_with_context("log(100)", 2)
+        self.assertEqual(result, 2)
+        self.assertIn('log', types)
+
+    def test_log_with_base(self):
+        """Test logarithm with custom base"""
+        # log(8, 2) = 3 (log base 2 of 8)
+        result, types, method, random_info, languages = parse_number_with_context("log(8, 2)", 3)
+        self.assertEqual(result, 3)
+        self.assertIn('log', types)
+        
+        # log(27, 3) = 3 (log base 3 of 27)
+        result, types, method, random_info, languages = parse_number_with_context("log(27, 3)", 3)
+        self.assertEqual(result, 3)
+        self.assertIn('log', types)
+
+    def test_log_in_complex_expression(self):
+        """Test logarithm combined with other operations"""
+        # log2(32) + 5 = 5 + 5 = 10
+        result, types, method, random_info, languages = parse_number_with_context("log2(32) + 5", 10)
+        self.assertEqual(result, 10)
+        self.assertIn('log', types)
+        self.assertIn('math', types)
+        
+        # log10(1000) * deux = 3 * 2 = 6
+        result, types, method, random_info, languages = parse_number_with_context("log10(1000) * deux", 6)
+        self.assertEqual(result, 6)
+        self.assertIn('log', types)
+        self.assertIn('fr', languages)
+
+    # === FIBONACCI TESTS ===
+    
+    def test_fibonacci_basic(self):
+        """Test basic Fibonacci function"""
+        # fib(10) = 55
+        result, types, method, random_info, languages = parse_number_with_context("fib(10)", 55)
+        self.assertEqual(result, 55)
+        self.assertIn('fibonacci', types)
+        self.assertIn('math', types)
+        
+        # fibonacci(7) = 13
+        result, types, method, random_info, languages = parse_number_with_context("fibonacci(7)", 13)
+        self.assertEqual(result, 13)
+        self.assertIn('fibonacci', types)
+        
+        # fib(12) = 144
+        result, types, method, random_info, languages = parse_number_with_context("fib(12)", 144)
+        self.assertEqual(result, 144)
+        self.assertIn('fibonacci', types)
+
+    def test_fibonacci_small_values(self):
+        """Test Fibonacci with small input values"""
+        # fib(1) = 1
+        result, types, method, random_info, languages = parse_number_with_context("fib(1)", 1)
+        self.assertEqual(result, 1)
+        self.assertIn('fibonacci', types)
+        
+        # fib(2) = 1
+        result, types, method, random_info, languages = parse_number_with_context("fib(2)", 1)
+        self.assertEqual(result, 1)
+        self.assertIn('fibonacci', types)
+        
+        # fib(6) = 8
+        result, types, method, random_info, languages = parse_number_with_context("fib(6)", 8)
+        self.assertEqual(result, 8)
+        self.assertIn('fibonacci', types)
+
+    def test_fibonacci_in_complex_expression(self):
+        """Test Fibonacci combined with other operations"""
+        # fib(8) + 1 = 21 + 1 = 22
+        result, types, method, random_info, languages = parse_number_with_context("fib(8) + 1", 22)
+        self.assertEqual(result, 22)
+        self.assertIn('fibonacci', types)
+        self.assertIn('math', types)
+        
+        # fib(7) * deux = 13 * 2 = 26
+        result, types, method, random_info, languages = parse_number_with_context("fib(7) * deux", 26)
+        self.assertEqual(result, 26)
+        self.assertIn('fibonacci', types)
+        self.assertIn('fr', languages)
+        
+        # sqrt(fib(12)) = sqrt(144) = 12
+        result, types, method, random_info, languages = parse_number_with_context("sqrt(fib(12))", 12)
+        self.assertEqual(result, 12)
+        self.assertIn('fibonacci', types)
+        self.assertIn('sqrt', types)
+
+
+class FibonacciLogWordArgumentTests(unittest.TestCase):
+    """Tests for Fibonacci and Log functions with word numbers and expressions as arguments"""
+    
+    # === FIBONACCI WITH WORD NUMBERS ===
+    
+    def test_fibonacci_with_single_word_number(self):
+        """Test Fibonacci with single word number arguments"""
+        # fib(een) = fib(1) = 1 (Dutch)
+        result, types, method, random_info, languages = parse_number_with_context("fib(een)", 1)
+        self.assertEqual(result, 1)
+        self.assertIn('fibonacci', types)
+        self.assertIn('nl', languages)
+        
+        # fib(five) = fib(5) = 5 (English)
+        result, types, method, random_info, languages = parse_number_with_context("fib(five)", 5)
+        self.assertEqual(result, 5)
+        self.assertIn('fibonacci', types)
+        self.assertIn('en', languages)
+        
+        # fib(sept) = fib(7) = 13 (French)
+        result, types, method, random_info, languages = parse_number_with_context("fib(sept)", 13)
+        self.assertEqual(result, 13)
+        self.assertIn('fibonacci', types)
+        self.assertIn('fr', languages)
+
+    def test_fibonacci_with_expression_argument(self):
+        """Test Fibonacci with mathematical expressions as arguments"""
+        # fib(two + 3) = fib(5) = 5
+        result, types, method, random_info, languages = parse_number_with_context("fib(two + 3)", 5)
+        self.assertEqual(result, 5)
+        self.assertIn('fibonacci', types)
+        self.assertIn('en', languages)
+        
+        # fib(3 * 2) = fib(6) = 8
+        result, types, method, random_info, languages = parse_number_with_context("fib(3 * 2)", 8)
+        self.assertEqual(result, 8)
+        self.assertIn('fibonacci', types)
+        
+        # fib(10 - 2) = fib(8) = 21
+        result, types, method, random_info, languages = parse_number_with_context("fib(10 - 2)", 21)
+        self.assertEqual(result, 21)
+        self.assertIn('fibonacci', types)
+
+    def test_fibonacci_with_multilang_expression(self):
+        """Test Fibonacci with multilingual expressions as arguments"""
+        # fib(twee + drie) = fib(2 + 3) = fib(5) = 5 (Dutch)
+        result, types, method, random_info, languages = parse_number_with_context("fib(twee + drie)", 5)
+        self.assertEqual(result, 5)
+        self.assertIn('fibonacci', types)
+        self.assertIn('nl', languages)
+        
+        # fib(quatre * deux) = fib(4 * 2) = fib(8) = 21 (French)
+        result, types, method, random_info, languages = parse_number_with_context("fib(quatre * deux)", 21)
+        self.assertEqual(result, 21)
+        self.assertIn('fibonacci', types)
+        self.assertIn('fr', languages)
+
+    # === LOG WITH WORD NUMBERS ===
+
+    def test_log_with_single_word_number(self):
+        """Test logarithm with single word number arguments"""
+        # log2(huit) = log2(8) = 3 (French)
+        result, types, method, random_info, languages = parse_number_with_context("log2(huit)", 3)
+        self.assertEqual(result, 3)
+        self.assertIn('log', types)
+        self.assertIn('fr', languages)
+        
+        # log10(hundred) = log10(100) = 2 (English)
+        result, types, method, random_info, languages = parse_number_with_context("log10(hundred)", 2)
+        self.assertEqual(result, 2)
+        self.assertIn('log', types)
+        self.assertIn('en', languages)
+        
+        # log2(zestien) = log2(16) = 4 (Dutch)
+        result, types, method, random_info, languages = parse_number_with_context("log2(zestien)", 4)
+        self.assertEqual(result, 4)
+        self.assertIn('log', types)
+        self.assertIn('nl', languages)
+
+    def test_log_with_expression_argument(self):
+        """Test logarithm with mathematical expressions as arguments"""
+        # log2(four * two) = log2(8) = 3
+        result, types, method, random_info, languages = parse_number_with_context("log2(four * two)", 3)
+        self.assertEqual(result, 3)
+        self.assertIn('log', types)
+        self.assertIn('en', languages)
+        
+        # log10(10 * 10) = log10(100) = 2
+        result, types, method, random_info, languages = parse_number_with_context("log10(10 * 10)", 2)
+        self.assertEqual(result, 2)
+        self.assertIn('log', types)
+        
+        # log2(2^6) = log2(64) = 6
+        result, types, method, random_info, languages = parse_number_with_context("log2(2^6)", 6)
+        self.assertEqual(result, 6)
+        self.assertIn('log', types)
+
+    def test_log_with_multilang_expression(self):
+        """Test logarithm with multilingual expressions as arguments"""
+        # log(dix * dix) = log(10 * 10) = log(100) = 2 (French)
+        result, types, method, random_info, languages = parse_number_with_context("log(dix * dix)", 2)
+        self.assertEqual(result, 2)
+        self.assertIn('log', types)
+        self.assertIn('fr', languages)
+        
+        # log2(vier * acht) = log2(4 * 8) = log2(32) = 5 (Dutch/German)
+        result, types, method, random_info, languages = parse_number_with_context("log2(vier * acht)", 5)
+        self.assertEqual(result, 5)
+        self.assertIn('log', types)
+
+    def test_nested_log_inside_fib(self):
+        """Test log nested inside fib"""
+        # fib(log2(huit)) = fib(3) = 2
+        result, types, method, random_info, languages = parse_number_with_context("fib(log2(huit))", 2)
+        self.assertEqual(result, 2)
+        self.assertIn('fibonacci', types)
+        self.assertIn('log', types)
+        self.assertIn('fr', languages)
+
+    def test_nested_fib_inside_log(self):
+        """Test fib nested inside log"""
+        # log2(fib(6)) = log2(8) = 3
+        result, types, method, random_info, languages = parse_number_with_context("log2(fib(6))", 3)
+        self.assertEqual(result, 3)
+        self.assertIn('fibonacci', types)
+        self.assertIn('log', types)
+
+    def test_deeply_nested_functions(self):
+        """Test multiple levels of nesting"""
+        # fib(log2(fib(6))) = fib(log2(8)) = fib(3) = 2
+        result, types, method, random_info, languages = parse_number_with_context("fib(log2(fib(6)))", 2)
+        self.assertEqual(result, 2)
+        self.assertIn('fibonacci', types)
+        self.assertIn('log', types)
+
+    # === COMBINED COMPLEX TESTS ===
+
+    def test_nested_functions_with_words(self):
+        """Test nested functions with word arguments"""
+        # fib(log2(huit)) = fib(log2(8)) = fib(3) = 2
+        result, types, method, random_info, languages = parse_number_with_context("fib(log2(huit))", 2)
+        self.assertEqual(result, 2)
+        self.assertIn('fibonacci', types)
+        self.assertIn('log', types)
+        self.assertIn('fr', languages)
+
+    def test_function_with_word_in_larger_expression(self):
+        """Test functions with word arguments as part of larger expressions"""
+        # fib(six) + 2 = fib(6) + 2 = 8 + 2 = 10
+        result, types, method, random_info, languages = parse_number_with_context("fib(six) + 2", 10)
+        self.assertEqual(result, 10)
+        self.assertIn('fibonacci', types)
+        self.assertIn('math', types)
+        
+        # log2(seize) * trois = log2(16) * 3 = 4 * 3 = 12 (French)
+        result, types, method, random_info, languages = parse_number_with_context("log2(seize) * trois", 12)
+        self.assertEqual(result, 12)
+        self.assertIn('log', types)
+        self.assertIn('fr', languages)
+
+    def test_fibonacci_with_roman_numeral_argument(self):
+        """Test Fibonacci with Roman numeral argument"""
+        # fib(X) = fib(10) = 55
+        result, types, method, random_info, languages = parse_number_with_context("fib(X)", 55)
+        self.assertEqual(result, 55)
+        self.assertIn('fibonacci', types)
+        self.assertIn('la', languages)
+        
+        # fib(VII) = fib(7) = 13
+        result, types, method, random_info, languages = parse_number_with_context("fib(VII)", 13)
+        self.assertEqual(result, 13)
+        self.assertIn('fibonacci', types)
+        self.assertIn('la', languages)
 
 if __name__ == '__main__':
     # Run all tests

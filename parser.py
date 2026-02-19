@@ -30,6 +30,32 @@ def calculate_factorial(n):
     return math.factorial(n)
 
 
+def calculate_fibonacci(n):
+    """Calculate the nth Fibonacci number, with safety limits."""
+    if n < 0 or n > 50:
+        return None
+    if n <= 1:
+        return n
+    a, b = 0, 1
+    for _ in range(2, n + 1):
+        a, b = b, a + b
+    return b
+
+
+def is_prime(n):
+    """Check if a number is prime."""
+    if n < 2:
+        return False
+    if n == 2:
+        return True
+    if n % 2 == 0:
+        return False
+    for i in range(3, int(math.sqrt(n)) + 1, 2):
+        if n % i == 0:
+            return False
+    return True
+
+
 def try_parse_roman_numeral(text):
     """
     Try to parse a Roman numeral (CASE-SENSITIVE - must be UPPERCASE).
@@ -77,12 +103,82 @@ def process_factorials(text):
     return re.sub(pattern, replace_factorial, text)
 
 
+def process_binary_hex(text):
+    """
+    Process binary (0b...) and hexadecimal (0x...) numbers in text.
+    
+    Returns: (processed_text, used_programmer_notation)
+    
+    Examples:
+    - 0b1010 -> 10
+    - 0xFF -> 255
+    - 0x2A -> 42
+    """
+    used_programmer = False
+    result = text
+    
+    # Process hexadecimal: 0x followed by hex digits (case insensitive)
+    hex_pattern = r'0x([0-9a-fA-F]+)'
+    
+    def replace_hex(match):
+        nonlocal used_programmer
+        try:
+            value = int(match.group(1), 16)
+            used_programmer = True
+            return str(value)
+        except ValueError:
+            return match.group(0)
+    
+    result = re.sub(hex_pattern, replace_hex, result)
+    
+    # Process binary: 0b followed by binary digits
+    binary_pattern = r'0b([01]+)'
+    
+    def replace_binary(match):
+        nonlocal used_programmer
+        try:
+            value = int(match.group(1), 2)
+            used_programmer = True
+            return str(value)
+        except ValueError:
+            return match.group(0)
+    
+    result = re.sub(binary_pattern, replace_binary, result, flags=re.IGNORECASE)
+    
+    # Process octal: 0o followed by octal digits (bonus feature)
+    octal_pattern = r'0o([0-7]+)'
+    
+    def replace_octal(match):
+        nonlocal used_programmer
+        try:
+            value = int(match.group(1), 8)
+            used_programmer = True
+            return str(value)
+        except ValueError:
+            return match.group(0)
+    
+    result = re.sub(octal_pattern, replace_octal, result, flags=re.IGNORECASE)
+    
+    return result, used_programmer
+
+
 def try_parse_multilang_number(text, expected_number=None):
     """
     Try to parse a number in various languages.
     If expected_number is provided, use it to disambiguate words with multiple meanings.
     """
     clean_text = text.lower().strip()
+    
+    def add_english_if_matches(value, langs):
+        """Add 'en' to languages if word is also valid English with same value."""
+        result_langs = set(langs)  # Create a copy to avoid modifying original
+        try:
+            english_value = w2n.word_to_num(clean_text)
+            if english_value == value:
+                result_langs.add('en')
+        except ValueError:
+            pass
+        return result_langs
     
     # Check for ambiguous numbers first
     if clean_text in AMBIGUOUS_NUMBERS:
@@ -92,17 +188,20 @@ def try_parse_multilang_number(text, expected_number=None):
         if expected_number is not None:
             for value, langs in possible_values:
                 if value == expected_number:
-                    return (value, langs)
+                    return (value, add_english_if_matches(value, langs))
         
         # Without context or no match, return the first one as default
-        return possible_values[0]
+        value, langs = possible_values[0]
+        return (value, add_english_if_matches(value, langs))
     
     if clean_text in MULTILANG_NUMBERS:
-        return MULTILANG_NUMBERS[clean_text]
+        value, langs = MULTILANG_NUMBERS[clean_text]
+        return (value, add_english_if_matches(value, langs))
     
     normalized = clean_text.replace(' et ', '-et-').replace(' ', '-')
     if normalized in MULTILANG_NUMBERS:
-        return MULTILANG_NUMBERS[normalized]
+        value, langs = MULTILANG_NUMBERS[normalized]
+        return (value, add_english_if_matches(value, langs))
     
     words = clean_text.split()
     if len(words) == 2:
@@ -110,10 +209,10 @@ def try_parse_multilang_number(text, expected_number=None):
         if tens_word in MULTILANG_NUMBERS and ones_word in MULTILANG_NUMBERS:
             tens_val, tens_langs = MULTILANG_NUMBERS[tens_word]
             ones_val, ones_langs = MULTILANG_NUMBERS[ones_word]
-            # Combine languages from both parts
             combined_langs = tens_langs.union(ones_langs)
             if tens_val in [20, 30, 40, 50, 60, 70, 80, 90] and 1 <= ones_val <= 9:
-                return (tens_val + ones_val, combined_langs)
+                combined_val = tens_val + ones_val
+                return (combined_val, add_english_if_matches(combined_val, combined_langs))
 
     # Spanish style 'tens y ones' e.g. 'treinta y cuatro'
     if ' y ' in clean_text:
@@ -125,21 +224,24 @@ def try_parse_multilang_number(text, expected_number=None):
                 ones_val, ones_langs = MULTILANG_NUMBERS[ones_word]
                 combined_langs = tens_langs.union(ones_langs)
                 if tens_val in [20, 30, 40, 50, 60, 70, 80, 90] and 1 <= ones_val <= 9:
-                    return (tens_val + ones_val, combined_langs)
+                    combined_val = tens_val + ones_val
+                    return (combined_val, add_english_if_matches(combined_val, combined_langs))
     
     if clean_text.startswith('soixante-'):
         remainder = clean_text[9:]
         if remainder in MULTILANG_NUMBERS:
             rem_val, rem_langs = MULTILANG_NUMBERS[remainder]
             if 10 <= rem_val <= 19:
-                return (60 + rem_val, {'fr'}.union(rem_langs))
+                combined_val = 60 + rem_val
+                return (combined_val, add_english_if_matches(combined_val, {'fr'}.union(rem_langs)))
     
     if clean_text.startswith('quatre-vingt-'):
         remainder = clean_text[13:]
         if remainder in MULTILANG_NUMBERS:
             rem_val, rem_langs = MULTILANG_NUMBERS[remainder]
             if 1 <= rem_val <= 19:
-                return (80 + rem_val, {'fr'}.union(rem_langs))
+                combined_val = 80 + rem_val
+                return (combined_val, add_english_if_matches(combined_val, {'fr'}.union(rem_langs)))
     
     return None
 
@@ -152,23 +254,35 @@ def try_parse_multilang_number_all_interpretations(text):
     clean_text = text.lower().strip()
     results = []
     
+    def add_english_if_matches(value, langs):
+        """Add 'en' to languages if word is also valid English with same value."""
+        result_langs = set(langs)  # Create a copy to avoid modifying original
+        try:
+            english_value = w2n.word_to_num(clean_text)
+            if english_value == value:
+                result_langs.add('en')
+        except ValueError:
+            pass
+        return result_langs
+    
     # Check for ambiguous numbers first
     if clean_text in AMBIGUOUS_NUMBERS:
-        results.extend(AMBIGUOUS_NUMBERS[clean_text])
+        for value, langs in AMBIGUOUS_NUMBERS[clean_text]:
+            results.append((value, add_english_if_matches(value, langs)))
     
     # Also check regular multilang numbers
     if clean_text in MULTILANG_NUMBERS:
         value, langs = MULTILANG_NUMBERS[clean_text]
         # Avoid duplicates
         if not any(v == value for v, _ in results):
-            results.append((value, langs))
+            results.append((value, add_english_if_matches(value, langs)))
     
     # Check normalized form
     normalized = clean_text.replace(' et ', '-et-').replace(' ', '-')
     if normalized in MULTILANG_NUMBERS and normalized != clean_text:
         value, langs = MULTILANG_NUMBERS[normalized]
         if not any(v == value for v, _ in results):
-            results.append((value, langs))
+            results.append((value, add_english_if_matches(value, langs)))
     
     # Two-word combinations
     words = clean_text.split()
@@ -181,7 +295,7 @@ def try_parse_multilang_number_all_interpretations(text):
             if tens_val in [20, 30, 40, 50, 60, 70, 80, 90] and 1 <= ones_val <= 9:
                 combined_val = tens_val + ones_val
                 if not any(v == combined_val for v, _ in results):
-                    results.append((combined_val, combined_langs))
+                    results.append((combined_val, add_english_if_matches(combined_val, combined_langs)))
 
     # Spanish style 'tens y ones'
     if ' y ' in clean_text:
@@ -195,7 +309,7 @@ def try_parse_multilang_number_all_interpretations(text):
                 if tens_val in [20, 30, 40, 50, 60, 70, 80, 90] and 1 <= ones_val <= 9:
                     combined_val = tens_val + ones_val
                     if not any(v == combined_val for v, _ in results):
-                        results.append((combined_val, combined_langs))
+                        results.append((combined_val, add_english_if_matches(combined_val, combined_langs)))
     
     # French special forms
     if clean_text.startswith('soixante-'):
@@ -205,7 +319,7 @@ def try_parse_multilang_number_all_interpretations(text):
             if 10 <= rem_val <= 19:
                 combined_val = 60 + rem_val
                 if not any(v == combined_val for v, _ in results):
-                    results.append((combined_val, {'fr'}.union(rem_langs)))
+                    results.append((combined_val, add_english_if_matches(combined_val, {'fr'}.union(rem_langs))))
     
     if clean_text.startswith('quatre-vingt-'):
         remainder = clean_text[13:]
@@ -214,7 +328,7 @@ def try_parse_multilang_number_all_interpretations(text):
             if 1 <= rem_val <= 19:
                 combined_val = 80 + rem_val
                 if not any(v == combined_val for v, _ in results):
-                    results.append((combined_val, {'fr'}.union(rem_langs)))
+                    results.append((combined_val, add_english_if_matches(combined_val, {'fr'}.union(rem_langs))))
     
     return results
 
@@ -267,7 +381,15 @@ def starts_with_parseable(text):
     text_lower = text_stripped.lower()
     
     # Check for digits or opening parenthesis or leading operators
-    if re.match(r'^\d', text_stripped) or re.match(r'^[(\-+:]', text_stripped) or text_lower.startswith(('sqrt(', 'random(')):
+    if re.match(r'^\d', text_stripped) or re.match(r'^[(\-+:]', text_stripped):
+        return True
+    
+    # Check for binary/hex notation
+    if re.match(r'^0[bBxXoO]', text_stripped):
+        return True
+    
+    # Check for known functions - these can have word arguments inside
+    if re.match(r'^(?:sqrt|random|log|log10|log2|ln|fib|fibonacci)\s*\(', text_lower):
         return True
     
     # Check for Roman numerals - only if the ENTIRE first word/token is Roman numerals
@@ -447,11 +569,342 @@ def generate_expression_variants(text, ambiguous_words):
     return variants
 
 
+def extract_balanced_parentheses(text, start_pos):
+    """
+    Extract content within balanced parentheses starting at start_pos.
+    start_pos should be the index of the opening '('.
+    Returns (content_inside, end_pos) or (None, -1) if unbalanced.
+    """
+    if start_pos >= len(text) or text[start_pos] != '(':
+        return None, -1
+    
+    depth = 0
+    for i in range(start_pos, len(text)):
+        if text[i] == '(':
+            depth += 1
+        elif text[i] == ')':
+            depth -= 1
+            if depth == 0:
+                # Found matching closing paren
+                content = text[start_pos + 1:i]  # Content between ( and )
+                return content, i
+    
+    return None, -1  # Unbalanced
+
+
+def preprocess_inner_expression(text, expected_number=None):
+    """
+    Preprocess an expression to convert words and constants to numbers.
+    Used for preprocessing content inside function parentheses like fib() and log().
+    Does NOT handle fib/log functions themselves (to avoid recursion).
+    
+    Returns: (processed_text, languages_used)
+    """
+    languages_used = set()
+    result = text
+    
+    # Process binary/hex first
+    result, used_programmer = process_binary_hex(result)
+    # Note: We don't track programmer type here, it's tracked at higher level
+    
+    result = result.replace('^', '**')
+    result = result.replace(':', '/')
+    
+    # Replace sqrt
+    def replace_sqrt(match):
+        return f"({match.group(1)})**0.5"
+    result = re.sub(r'sqrt\s*\(\s*([^)]+)\s*\)', replace_sqrt, result, flags=re.IGNORECASE)
+    
+    # Replace constants
+    for constant, value in MATH_CONSTANTS.items():
+        result = re.sub(r'\b' + re.escape(constant) + r'\b', str(value), result, flags=re.IGNORECASE)
+    
+    # Replace Roman numerals (CASE-SENSITIVE)
+    roman_pattern = r'\b([IVXLCDM]+)\b'
+    roman_matches_with_pos = [(m.group(), m.start(), m.end()) 
+                               for m in re.finditer(roman_pattern, result)]
+    
+    for roman_text, start_pos, end_pos in reversed(roman_matches_with_pos):
+        roman_value = try_parse_roman_numeral(roman_text)
+        if roman_value is not None:
+            result = result[:start_pos] + str(roman_value) + result[end_pos:]
+            languages_used.add('la')
+    
+    # Replace ambiguous words with context
+    for word in AMBIGUOUS_NUMBERS.keys():
+        pattern = r'\b' + re.escape(word) + r'\b'
+        if re.search(pattern, result, re.IGNORECASE):
+            multilang_result = try_parse_multilang_number(word, expected_number)
+            if multilang_result:
+                value, langs = multilang_result
+                result = re.sub(pattern, str(value), result, flags=re.IGNORECASE)
+                languages_used.update(langs)
+    
+    # Replace word numbers (multilang and English)
+    words_with_pos = [(m.group(), m.start(), m.end()) 
+                  for m in re.finditer(r'\b[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+(?:-[a-zA-ZÀ-ÿüğşıöçÖÇİĞÜŞøæåØÆÅぁ-んァ-ヶー一-龯]+)*\b', result)]
+
+    for word, start_pos, end_pos in reversed(words_with_pos):
+        multilang_result = try_parse_multilang_number(word.lower(), expected_number)
+        if multilang_result is not None:
+            num_val, langs = multilang_result
+            result = result[:start_pos] + str(num_val) + result[end_pos:]
+            languages_used.update(langs)
+            continue
+        
+        try:
+            number = w2n.word_to_num(word.lower())
+            result = result[:start_pos] + str(number) + result[end_pos:]
+            languages_used.add('en')
+        except ValueError:
+            continue
+    
+    return result, languages_used
+
+
+def process_fibonacci_functions(text, expected_number=None):
+    """
+    Process fib(n) and fibonacci(n) functions in text.
+    
+    Handles:
+    - fib(10) - simple integers
+    - fib(een) - word numbers  
+    - fib(two + 3) - expressions inside
+    - fib(log2(huit)) - nested functions
+    
+    Returns: (processed_text, languages_used)
+    """
+    languages_collected = set()
+    result = text
+    
+    # Keep processing until no more fib/fibonacci functions are found
+    max_iterations = 10  # Safety limit
+    iteration = 0
+    
+    while iteration < max_iterations:
+        iteration += 1
+        
+        # Find fib( or fibonacci( 
+        match = re.search(r'(?:fib|fibonacci)\s*\(', result, re.IGNORECASE)
+        if not match:
+            break
+        
+        func_start = match.start()
+        paren_start = match.end() - 1  # Position of '('
+        
+        # Extract balanced content
+        inner_content, paren_end = extract_balanced_parentheses(result, paren_start)
+        if inner_content is None:
+            break  # Unbalanced, stop processing
+        
+        # Process the inner content recursively (handles nested functions)
+        processed_inner = inner_content
+        
+        # First, recursively process any nested fib/log functions
+        processed_inner, nested_langs = process_fibonacci_functions(processed_inner, expected_number)
+        languages_collected.update(nested_langs)
+        
+        processed_inner, nested_langs = process_log_functions(processed_inner, expected_number)
+        languages_collected.update(nested_langs)
+        
+        # Now preprocess word numbers and evaluate
+        try:
+            # Try simple integer first
+            n = int(processed_inner.strip())
+        except ValueError:
+            try:
+                processed_inner, inner_langs = preprocess_inner_expression(processed_inner, expected_number)
+                languages_collected.update(inner_langs)
+                
+                try:
+                    n = int(round(evaluate_expression_safe(processed_inner)))
+                except:
+                    n = int(round(float(processed_inner.strip())))
+            except:
+                # Can't evaluate, skip this function call
+                break
+        
+        fib_result = calculate_fibonacci(n)
+        if fib_result is None:
+            break
+        
+        # Replace the entire function call with the result
+        result = result[:func_start] + str(fib_result) + result[paren_end + 1:]
+    
+    return result, languages_collected
+
+
+def process_log_functions(text, expected_number=None):
+    """
+    Process log functions in text: log(), ln(), log10(), log2(), log(x,base).
+    
+    Handles word numbers, expressions, and nested functions inside the parentheses.
+    
+    Returns: (processed_text, languages_used)
+    """
+    languages_collected = set()
+    result = text
+    
+    def preprocess_arg(arg_text):
+        """Preprocess a function argument and return its numeric value."""
+        nonlocal languages_collected
+        arg_stripped = arg_text.strip()
+        
+        # First, recursively process any nested fib/log functions
+        processed, nested_langs = process_fibonacci_functions(arg_stripped, expected_number)
+        languages_collected.update(nested_langs)
+        
+        processed, nested_langs = process_log_functions(processed, expected_number)
+        languages_collected.update(nested_langs)
+        
+        try:
+            return float(processed)
+        except ValueError:
+            processed, langs = preprocess_inner_expression(processed, expected_number)
+            languages_collected.update(langs)
+            try:
+                return float(evaluate_expression_safe(processed))
+            except:
+                return float(processed.strip())
+    
+    # Process each log function type
+    # We need to handle them iteratively to deal with nested functions
+    
+    max_iterations = 10
+    
+    for _ in range(max_iterations):
+        modified = False
+        
+        # Handle log with base: log(value, base)
+        match = re.search(r'log\s*\(', result, re.IGNORECASE)
+        if match:
+            paren_start = match.end() - 1
+            inner_content, paren_end = extract_balanced_parentheses(result, paren_start)
+            
+            if inner_content is not None and ',' in inner_content:
+                # Split by comma - but be careful of nested functions with commas
+                # Find the top-level comma
+                depth = 0
+                comma_pos = -1
+                for i, ch in enumerate(inner_content):
+                    if ch == '(':
+                        depth += 1
+                    elif ch == ')':
+                        depth -= 1
+                    elif ch == ',' and depth == 0:
+                        comma_pos = i
+                        break
+                
+                if comma_pos > 0:
+                    try:
+                        value_str = inner_content[:comma_pos]
+                        base_str = inner_content[comma_pos + 1:]
+                        value = preprocess_arg(value_str)
+                        base = preprocess_arg(base_str)
+                        
+                        if value > 0 and base > 0 and base != 1:
+                            log_result = math.log(value, base)
+                            result = result[:match.start()] + str(log_result) + result[paren_end + 1:]
+                            modified = True
+                            continue
+                    except:
+                        pass
+        
+        # Handle ln(x)
+        match = re.search(r'ln\s*\(', result, re.IGNORECASE)
+        if match:
+            paren_start = match.end() - 1
+            inner_content, paren_end = extract_balanced_parentheses(result, paren_start)
+            
+            if inner_content is not None:
+                try:
+                    value = preprocess_arg(inner_content)
+                    if value > 0:
+                        log_result = math.log(value)
+                        result = result[:match.start()] + str(log_result) + result[paren_end + 1:]
+                        modified = True
+                        continue
+                except:
+                    pass
+        
+        # Handle log10(x)
+        match = re.search(r'log10\s*\(', result, re.IGNORECASE)
+        if match:
+            paren_start = match.end() - 1
+            inner_content, paren_end = extract_balanced_parentheses(result, paren_start)
+            
+            if inner_content is not None:
+                try:
+                    value = preprocess_arg(inner_content)
+                    if value > 0:
+                        log_result = math.log10(value)
+                        result = result[:match.start()] + str(log_result) + result[paren_end + 1:]
+                        modified = True
+                        continue
+                except:
+                    pass
+        
+        # Handle log2(x)
+        match = re.search(r'log2\s*\(', result, re.IGNORECASE)
+        if match:
+            paren_start = match.end() - 1
+            inner_content, paren_end = extract_balanced_parentheses(result, paren_start)
+            
+            if inner_content is not None:
+                try:
+                    value = preprocess_arg(inner_content)
+                    if value > 0:
+                        log_result = math.log2(value)
+                        result = result[:match.start()] + str(log_result) + result[paren_end + 1:]
+                        modified = True
+                        continue
+                except:
+                    pass
+        
+        # Handle simple log(x) - defaults to base 10
+        # Must check this AFTER log10/log2 to avoid conflicts
+        match = re.search(r'log\s*\(', result, re.IGNORECASE)
+        if match:
+            paren_start = match.end() - 1
+            inner_content, paren_end = extract_balanced_parentheses(result, paren_start)
+            
+            if inner_content is not None and ',' not in inner_content:
+                try:
+                    value = preprocess_arg(inner_content)
+                    if value > 0:
+                        log_result = math.log10(value)
+                        result = result[:match.start()] + str(log_result) + result[paren_end + 1:]
+                        modified = True
+                        continue
+                except:
+                    pass
+        
+        if not modified:
+            break
+    
+    return result, languages_collected
+
+
 def preprocess_expression(text, expected_number=None):
     """Preprocess mathematical expression for evaluation."""
     languages_used = set()
+    
+    # Process binary/hex first
+    text, used_programmer = process_binary_hex(text)
+    if used_programmer:
+        # We'll add 'programmer' type later in analyze_input_types
+        pass
+    
     text = text.replace('^', '**')
     text = text.replace(':', '/')
+    
+    # Process Fibonacci functions (handles word numbers and expressions inside)
+    text, fib_langs = process_fibonacci_functions(text, expected_number)
+    languages_used.update(fib_langs)
+    
+    # Process logarithm functions (handles word numbers and expressions inside)
+    text, log_langs = process_log_functions(text, expected_number)
+    languages_used.update(log_langs)
     
     def replace_sqrt(match):
         return f"({match.group(1)})**0.5"
@@ -522,8 +975,20 @@ def preprocess_expression_all_variants(text):
         languages_used = set(ambiguous_langs)
         
         processed = variant_text
+        
+        # Process binary/hex first
+        processed, used_programmer = process_binary_hex(processed)
+        
         processed = processed.replace('^', '**')
         processed = processed.replace(':', '/')
+        
+        # Process Fibonacci functions (handles word numbers and expressions inside)
+        processed, fib_langs = process_fibonacci_functions(processed)
+        languages_used.update(fib_langs)
+        
+        # Process logarithm functions (handles word numbers and expressions inside)
+        processed, log_langs = process_log_functions(processed)
+        languages_used.update(log_langs)
         
         def replace_sqrt(match):
             return f"({match.group(1)})**0.5"
@@ -671,6 +1136,11 @@ def analyze_input_types(original_text):
     """Analyze and categorize the types of input in the text."""
     types = set()
     
+    # Check for binary/hex notation
+    if re.search(r'0x[0-9a-fA-F]+', original_text) or re.search(r'0b[01]+', original_text, re.IGNORECASE) or re.search(r'0o[0-7]+', original_text, re.IGNORECASE):
+        types.add('programmer')
+        types.add('math')
+    
     # Check for Roman numerals
     if re.search(r'\b[IVXLCDM]+\b', original_text):
         # Verify it's actually a valid Roman numeral
@@ -683,11 +1153,27 @@ def analyze_input_types(original_text):
         types.add('factorial')
         types.add('math')
     
-    if re.search(r'[+\-*/:()%^]', original_text):
+    if re.search(r'[+\-*/:()%]', original_text):
+        types.add('math')
+    
+    # Check for power/exponent operations (^ or **)
+    if re.search(r'\^|\*\*', original_text):
+        types.add('power')
         types.add('math')
     
     if re.search(r'sqrt\s*\(', original_text, re.IGNORECASE):
         types.add('sqrt')
+        types.add('math')
+    
+    # Check for logarithm functions
+    if re.search(r'(?:log|log10|log2|ln)\s*\(', original_text, re.IGNORECASE):
+        types.add('log')
+        types.add('math')
+    
+    # Check for Fibonacci functions
+    if re.search(r'(?:fib|fibonacci)\s*\(', original_text, re.IGNORECASE):
+        types.add('fibonacci')
+        types.add('math')
     
     if re.search(r'random\s*\(', original_text, re.IGNORECASE):
         types.add('random')
@@ -706,7 +1192,7 @@ def analyze_input_types(original_text):
             continue
         try:
             w2n.word_to_num(word.lower())
-            types.add('text')
+            # Note: 'text' type removed - no longer used
             break
         except ValueError:
             continue
@@ -810,6 +1296,9 @@ def get_all_possible_interpretations(text, expected_number=None):
     processed_text, random_values = process_random_functions(text)
     all_languages = set()
     
+    # Check for binary/hex first
+    processed_text, used_programmer = process_binary_hex(processed_text)
+    
     # Check for Roman numerals first (before other processing)
     roman_match = re.match(r'^([IVXLCDM]+)(?:\s|$)', processed_text)
     if roman_match:
@@ -862,7 +1351,9 @@ def get_all_possible_interpretations(text, expected_number=None):
     is_math_expression = (has_spaced_operators(processed_text) or 
                          has_unspaced_operators(processed_text) or 
                          '!' in text or 
-                         'sqrt(' in processed_text.lower() or 
+                         'sqrt(' in processed_text.lower() or
+                         re.search(r'(?:fib|fibonacci|log|log2|log10|ln)\s*\(', processed_text, re.IGNORECASE) or
+                         used_programmer or
                          any(const in processed_text.lower() for const in MATH_CONSTANTS))
     
     if is_math_expression:
@@ -1020,6 +1511,31 @@ def parse_number_with_context(text, expected_number):
             rounded = round(value)
             if rounded > 0:
                 return rounded, {'decimal'}, 'simple_decimal', None, set()
+        except ValueError:
+            pass
+    
+    # Check for simple binary/hex
+    if re.match(r'^0x[0-9a-fA-F]+$', text):
+        try:
+            value = int(text, 16)
+            if value > 0:
+                return value, {'programmer'}, 'simple_hex', None, set()
+        except ValueError:
+            pass
+    
+    if re.match(r'^0b[01]+$', text, re.IGNORECASE):
+        try:
+            value = int(text, 2)
+            if value > 0:
+                return value, {'programmer'}, 'simple_binary', None, set()
+        except ValueError:
+            pass
+    
+    if re.match(r'^0o[0-7]+$', text, re.IGNORECASE):
+        try:
+            value = int(text, 8)
+            if value > 0:
+                return value, {'programmer'}, 'simple_octal', None, set()
         except ValueError:
             pass
     

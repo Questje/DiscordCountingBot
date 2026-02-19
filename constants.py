@@ -31,12 +31,16 @@ ACHIEVEMENT_EMOJIS = {
     'math': '🧮',
     'factorial': '❗',
     'constants': '🔬',
-    'sqrt': '🌿',
+    'sqrt': '🥕',       # Carrot - it's a root vegetable! 
+    'power': '💪',      # Power - flexing that exponential strength!
+    'log': '🪵',        # Log - it's a LOG! 
+    'fibonacci': '🐚',  # Fibonacci - nautilus shell spiral
     'random': '🎲',
     'decimal': '📐',
     'polyglot': '🗣️',
-    'text': '🔤',
     'multiple': '🔢',
+    'prime': '🎯',       # Prime numbers - hitting the target!
+    'programmer': '💻',  # Binary/hexadecimal notation
 }
 
 # Language flags

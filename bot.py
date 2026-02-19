@@ -8,7 +8,7 @@ import asyncio
 import random
 from datetime import datetime
 from constants import LANGUAGE_FLAGS, ACHIEVEMENT_EMOJIS
-from parser import parse_number_with_context, parse_multiple_numbers_with_context
+from parser import parse_number_with_context, parse_multiple_numbers_with_context, is_prime
 from utils import (get_mistake_message, get_streak_message, check_user_timeout,
                    apply_timeout)
 import game_logic
@@ -110,10 +110,11 @@ def format_profile_embed(username, stats):
     wrong = stats.get('wrong', 0)
     total = correct + wrong
     accuracy = (correct / total * 100) if total > 0 else 0
+    primes_counted = stats.get('primes_counted', 0)
     
     embed.add_field(
         name="📈 Statistics",
-        value=f"**Correct:** {correct}\n**Wrong:** {wrong}\n**Accuracy:** {accuracy:.1f}%",
+        value=f"**Correct:** {correct}\n**Wrong:** {wrong}\n**Accuracy:** {accuracy:.1f}%\n**Primes Counted:** {primes_counted} 🎯",
         inline=True
     )
     
@@ -125,13 +126,24 @@ def format_profile_embed(username, stats):
     
     unlocked_achievements = stats.get('achievements', set())
     if unlocked_achievements:
-        sorted_achievements = sorted(list(unlocked_achievements))
+        # Filter out deprecated 'text' achievement from legacy data
+        filtered_achievements = [ach for ach in unlocked_achievements if ach != 'text']
+        sorted_achievements = sorted(filtered_achievements)
         achievement_emojis = [ACHIEVEMENT_EMOJIS.get(ach, '') for ach in sorted_achievements]
-        embed.add_field(
-            name="🏆 Achievements",
-            value=' '.join(emoji for emoji in achievement_emojis if emoji),
-            inline=False
-        )
+        valid_emojis = [emoji for emoji in achievement_emojis if emoji]
+        
+        if valid_emojis:
+            embed.add_field(
+                name="🏆 Achievements",
+                value=' '.join(valid_emojis),
+                inline=False
+            )
+        else:
+            embed.add_field(
+                name="🏆 Achievements",
+                value="No achievements unlocked yet. Keep counting!",
+                inline=False
+            )
     else:
         embed.add_field(
             name="🏆 Achievements",
@@ -173,6 +185,74 @@ async def on_ready():
         print(f'📢 Sent greeting to channel {CHANNEL_ID}')
     else:
         print(f'❌ Could not find channel with ID {CHANNEL_ID}')
+
+
+async def handle_correct_answer(message, parsed_numbers, types_used, languages, random_info, count):
+    """Handle a correct answer - add reactions and update stats."""
+    # Add basic correct reaction
+    await message.add_reaction('✅')
+    
+    # Add special reaction for multiple numbers
+    if count > 1:
+        await message.add_reaction('🔢')
+    
+    # Add language flag reactions for all detected languages
+    for lang in languages:
+        if lang in LANGUAGE_FLAGS:
+            await message.add_reaction(LANGUAGE_FLAGS[lang])
+    
+    # Check for polyglot achievement (4+ languages)
+    if len(languages) >= 4:
+        await message.channel.send(
+            f"🗣️ **POLYGLOT!** {message.author.display_name} just used {len(languages)} different languages in one expression! Amazing linguistic skills! 🌍"
+        )
+    
+    # Check for multiple numbers achievement
+    if count > 1:
+        await message.channel.send(
+            f"🔢 **MULTIPLE!** {message.author.display_name} just answered {count} consecutive numbers at once! Impressive! 🎯"
+        )
+    
+    # Add achievement emoji reactions based on types used
+    added_emojis = set()
+    
+    for type_used in types_used:
+        if type_used in ACHIEVEMENT_EMOJIS and ACHIEVEMENT_EMOJIS[type_used] not in added_emojis:
+            try:
+                await message.add_reaction(ACHIEVEMENT_EMOJIS[type_used])
+                added_emojis.add(ACHIEVEMENT_EMOJIS[type_used])
+            except discord.errors.HTTPException:
+                pass
+    
+    # Check if any of the counted numbers are prime and add reactions/update stats
+    for num in parsed_numbers:
+        if is_prime(num):
+            # Add prime reaction if not already added
+            if ACHIEVEMENT_EMOJIS.get('prime') not in added_emojis:
+                try:
+                    await message.add_reaction(ACHIEVEMENT_EMOJIS['prime'])
+                    added_emojis.add(ACHIEVEMENT_EMOJIS['prime'])
+                except discord.errors.HTTPException:
+                    pass
+            
+            # Update user's primes_counted stat
+            if message.author.id in game_logic.user_stats:
+                if 'primes_counted' not in game_logic.user_stats[message.author.id]:
+                    game_logic.user_stats[message.author.id]['primes_counted'] = 0
+                game_logic.user_stats[message.author.id]['primes_counted'] += 1
+                
+                # Add prime achievement to user
+                if 'achievements' not in game_logic.user_stats[message.author.id]:
+                    game_logic.user_stats[message.author.id]['achievements'] = set()
+                game_logic.user_stats[message.author.id]['achievements'].add('prime')
+    
+    # Check for streak message
+    streak_message, new_milestone = get_streak_message(
+        game_logic.total_correct, game_logic.last_streak_milestone
+    )
+    if streak_message:
+        game_logic.last_streak_milestone = new_milestone
+        await message.channel.send(streak_message)
 
 
 @client.event
@@ -318,47 +398,8 @@ async def on_message(message):
                         num, content, types_used, parse_method, languages
                     )
                 
-                # Add reactions
-                await message.add_reaction('✅')
-                
-                # Add special reaction for multiple numbers
-                if count > 1:
-                    await message.add_reaction('🔢')
-                
-                # Add language flag reactions for all detected languages
-                for lang in languages:
-                    if lang in LANGUAGE_FLAGS:
-                        await message.add_reaction(LANGUAGE_FLAGS[lang])
-                
-                # Check for polyglot achievement (4+ languages)
-                if len(languages) >= 4:
-                    await message.channel.send(
-                        f"🗣️ **POLYGLOT!** {message.author.display_name} just used {len(languages)} different languages in one expression! Amazing linguistic skills! 🌍"
-                    )
-                
-                # Check for multiple numbers achievement
-                if count > 1:
-                    await message.channel.send(
-                        f"🔢 **MULTIPLE!** {message.author.display_name} just answered {count} consecutive numbers at once! Impressive! 🎯"
-                    )
-                
-                # Add achievement emoji reactions based on types used
-                added_emojis = set()
-                
-                for type_used in types_used:
-                    if type_used in ACHIEVEMENT_EMOJIS and ACHIEVEMENT_EMOJIS[type_used] not in added_emojis:
-                        try:
-                            await message.add_reaction(ACHIEVEMENT_EMOJIS[type_used])
-                            added_emojis.add(ACHIEVEMENT_EMOJIS[type_used])
-                        except discord.errors.HTTPException:
-                            pass
-                
-                streak_message, new_milestone = get_streak_message(
-                    game_logic.total_correct, game_logic.last_streak_milestone
-                )
-                if streak_message:
-                    game_logic.last_streak_milestone = new_milestone
-                    await message.channel.send(streak_message)
+                # Handle correct answer reactions and achievements
+                await handle_correct_answer(message, parsed_numbers, types_used, languages, random_info, count)
                 
                 if count > 1:
                     print(f'✅ Correct (Multiple x{count}): "{content}" → {parsed_numbers} by {message.author.display_name}')
@@ -412,33 +453,8 @@ async def on_message(message):
                                 parsed_number, content, types_used, parse_method, languages
                             )
                             
-                            await message.add_reaction('✅')
-                            
-                            for lang in languages:
-                                if lang in LANGUAGE_FLAGS:
-                                    await message.add_reaction(LANGUAGE_FLAGS[lang])
-                            
-                            if len(languages) >= 4:
-                                await message.channel.send(
-                                    f"🗣️ **POLYGLOT!** {message.author.display_name} just used {len(languages)} different languages in one expression! Amazing linguistic skills! 🌍"
-                                )
-                            
-                            added_emojis = set()
-                            
-                            for type_used in types_used:
-                                if type_used in ACHIEVEMENT_EMOJIS and ACHIEVEMENT_EMOJIS[type_used] not in added_emojis:
-                                    try:
-                                        await message.add_reaction(ACHIEVEMENT_EMOJIS[type_used])
-                                        added_emojis.add(ACHIEVEMENT_EMOJIS[type_used])
-                                    except discord.errors.HTTPException:
-                                        pass
-                            
-                            streak_message, new_milestone = get_streak_message(
-                                game_logic.total_correct, game_logic.last_streak_milestone
-                            )
-                            if streak_message:
-                                game_logic.last_streak_milestone = new_milestone
-                                await message.channel.send(streak_message)
+                            # Handle correct answer reactions and achievements
+                            await handle_correct_answer(message, [parsed_number], types_used, languages, random_info, 1)
                             
                             print(f'✅ Correct: "{content}" → {parsed_number} by {message.author.display_name}')
                             print(f'   Types used: {types_used}')
